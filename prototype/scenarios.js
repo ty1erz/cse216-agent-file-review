@@ -1,0 +1,175 @@
+// Synthetic scenarios. Each one is a user request, the command an agent proposes
+// for it, and a fake file tree. Nothing here is real data.
+//
+//   scope     folders the request names; changes outside them get flagged
+//   agentSays the agent's own one-line description (what the baseline shows)
+//   matches   answer key: does the command do what the user asked?
+//   issue     what goes wrong, shown only after the survey
+//   set       "X" or "Y"; participants see one set per interface, and each set
+//             has two matching and two mismatching scenarios
+
+window.TODAY = "Fri, Oct 23, 2026";
+
+window.PRACTICE = {
+  id: "practice",
+  title: "Practice",
+  request: "Delete the empty file notes/scratch.txt.",
+  command: "rm notes/scratch.txt",
+  agentSays: "Removes the empty scratch file.",
+  scope: ["notes"],
+  matches: true,
+  files: [
+    { path: "notes/scratch.txt", size: 0, mtime: "2026-10-22" },
+    { path: "notes/ideas.md", size: 2400, mtime: "2026-10-19" },
+  ],
+};
+
+window.SCENARIOS = [
+  {
+    id: "rm-tmp",
+    set: "X",
+    request: "Delete the .tmp files in build/.",
+    command: "rm build/*.tmp",
+    agentSays: "Removes temporary build files.",
+    scope: ["build"],
+    matches: true,
+    issue: "None. Only the three .tmp files in build/ are deleted.",
+    files: [
+      { path: "build/app.js", size: 184000, mtime: "2026-10-23" },
+      { path: "build/app.js.map", size: 402000, mtime: "2026-10-23" },
+      { path: "build/cache-1.tmp", size: 52000, mtime: "2026-10-23" },
+      { path: "build/cache-2.tmp", size: 48000, mtime: "2026-10-23" },
+      { path: "build/cache-3.tmp", size: 61000, mtime: "2026-10-23" },
+      { path: "src/index.js", size: 4100, mtime: "2026-10-22" },
+      { path: "src/util.js", size: 2200, mtime: "2026-10-20" },
+      { path: "README.md", size: 1800, mtime: "2026-09-30" },
+    ],
+  },
+  {
+    id: "rm-drafts",
+    set: "X",
+    request: "Delete my drafts in docs/drafts. I don't need them anymore.",
+    command: "rm -r docs/*",
+    agentSays: "Removes the draft documents.",
+    scope: ["docs/drafts"],
+    matches: false,
+    issue: "The wildcard is docs/*, not docs/drafts/*, so it also deletes docs/final (the finished thesis) and docs/figures.",
+    files: [
+      { path: "docs/drafts/intro_v1.md", size: 8200, mtime: "2026-09-02" },
+      { path: "docs/drafts/intro_v2.md", size: 9100, mtime: "2026-09-15" },
+      { path: "docs/drafts/outline.md", size: 3300, mtime: "2026-08-28" },
+      { path: "docs/final/thesis.pdf", size: 2480000, mtime: "2026-10-21" },
+      { path: "docs/final/thesis.docx", size: 940000, mtime: "2026-10-21" },
+      { path: "docs/figures/fig1.png", size: 310000, mtime: "2026-10-10" },
+      { path: "docs/figures/fig2.png", size: 285000, mtime: "2026-10-10" },
+      { path: "notes.txt", size: 1200, mtime: "2026-10-18" },
+    ],
+  },
+  {
+    id: "rm-logs",
+    set: "Y",
+    request: "Clean up the old log files in logs/, but keep today's log.",
+    command: "rm logs/*.log",
+    agentSays: "Removes old log files.",
+    scope: ["logs"],
+    matches: false,
+    issue: "*.log matches every log, including today's (server-2026-10-23.log), which the user asked to keep.",
+    files: [
+      { path: "logs/server-2026-10-20.log", size: 1200000, mtime: "2026-10-20" },
+      { path: "logs/server-2026-10-21.log", size: 1350000, mtime: "2026-10-21" },
+      { path: "logs/server-2026-10-22.log", size: 990000, mtime: "2026-10-22" },
+      { path: "logs/server-2026-10-23.log", size: 640000, mtime: "2026-10-23" },
+      { path: "logs/README.md", size: 900, mtime: "2026-07-01" },
+      { path: "app/main.py", size: 7400, mtime: "2026-10-22" },
+    ],
+  },
+  {
+    id: "cp-config",
+    set: "X",
+    request: "Back up the config files into backup/ before I edit them.",
+    command: "cp config/*.yaml backup/",
+    agentSays: "Copies the YAML config files into backup/.",
+    scope: ["config", "backup"],
+    matches: true,
+    issue: "None. Three new copies are created and nothing is overwritten.",
+    files: [
+      { path: "config/app.yaml", size: 2100, mtime: "2026-10-12" },
+      { path: "config/db.yaml", size: 900, mtime: "2026-10-12" },
+      { path: "config/cache.yaml", size: 600, mtime: "2026-09-30" },
+      { path: "backup/" },
+      { path: "src/server.py", size: 12000, mtime: "2026-10-22" },
+    ],
+  },
+  {
+    id: "cp-photos",
+    set: "Y",
+    request: "Copy the new photos from camera/ into my photos/ library.",
+    command: "cp camera/* photos/",
+    agentSays: "Copies the new camera photos into photos/.",
+    scope: ["camera", "photos"],
+    matches: false,
+    issue: "The camera restarted its numbering, so IMG_0001.jpg and IMG_0002.jpg already exist in photos/ (from June 2025). cp silently overwrites those older photos.",
+    files: [
+      { path: "camera/IMG_0001.jpg", size: 4200000, mtime: "2026-10-22" },
+      { path: "camera/IMG_0002.jpg", size: 3900000, mtime: "2026-10-22" },
+      { path: "camera/IMG_0003.jpg", size: 4100000, mtime: "2026-10-22" },
+      { path: "photos/IMG_0001.jpg", size: 3600000, mtime: "2025-06-14", note: "Beach trip" },
+      { path: "photos/IMG_0002.jpg", size: 3700000, mtime: "2025-06-14", note: "Beach trip" },
+      { path: "photos/IMG_0871.jpg", size: 3500000, mtime: "2026-03-02" },
+      { path: "photos/IMG_0872.jpg", size: 3400000, mtime: "2026-03-02" },
+    ],
+  },
+  {
+    id: "mv-rename",
+    set: "Y",
+    request: "Rename report_v2.docx to report_final.docx.",
+    command: "mv reports/report_v2.docx reports/report_final.docx",
+    agentSays: "Renames the report to report_final.docx.",
+    scope: ["reports"],
+    matches: true,
+    issue: "None. One file is renamed and nothing is overwritten.",
+    files: [
+      { path: "reports/report_v1.docx", size: 310000, mtime: "2026-10-01" },
+      { path: "reports/report_v2.docx", size: 342000, mtime: "2026-10-20" },
+      { path: "reports/data.xlsx", size: 88000, mtime: "2026-10-19" },
+    ],
+  },
+  {
+    id: "mv-invoices",
+    set: "X",
+    request: "Move the invoice PDFs from Downloads into finance/2026/.",
+    command: "mv Downloads/*.pdf finance/2026/",
+    agentSays: "Moves the PDF invoices into finance/2026/.",
+    scope: ["Downloads", "finance/2026"],
+    matches: false,
+    issue: "*.pdf matches every PDF, so the tax return and the boarding pass get filed under finance/2026 along with the invoices.",
+    files: [
+      { path: "Downloads/invoice_04.pdf", size: 120000, mtime: "2026-10-05" },
+      { path: "Downloads/invoice_05.pdf", size: 118000, mtime: "2026-10-19" },
+      { path: "Downloads/tax_return_2025.pdf", size: 640000, mtime: "2026-04-11" },
+      { path: "Downloads/boarding_pass_SAN.pdf", size: 90000, mtime: "2026-10-22" },
+      { path: "Downloads/setup.dmg", size: 84000000, mtime: "2026-10-15" },
+      { path: "finance/2026/invoice_01.pdf", size: 121000, mtime: "2026-01-08" },
+      { path: "finance/2026/invoice_02.pdf", size: 119000, mtime: "2026-04-03" },
+      { path: "finance/2026/invoice_03.pdf", size: 117000, mtime: "2026-07-09" },
+    ],
+  },
+  {
+    id: "mv-screenshots",
+    set: "Y",
+    request: "Move all the screenshots on my Desktop into Desktop/screenshots/.",
+    command: "mv Desktop/Screenshot*.png Desktop/screenshots/",
+    agentSays: "Moves the screenshots into Desktop/screenshots/.",
+    scope: ["Desktop"],
+    matches: true,
+    issue: "None. Only the three screenshots move, and nothing is overwritten.",
+    files: [
+      { path: "Desktop/Screenshot 2026-10-21 at 09.14.png", size: 820000, mtime: "2026-10-21" },
+      { path: "Desktop/Screenshot 2026-10-22 at 13.02.png", size: 760000, mtime: "2026-10-22" },
+      { path: "Desktop/Screenshot 2026-10-23 at 08.47.png", size: 905000, mtime: "2026-10-23" },
+      { path: "Desktop/todo.txt", size: 400, mtime: "2026-10-23" },
+      { path: "Desktop/resume.pdf", size: 210000, mtime: "2026-09-12" },
+      { path: "Desktop/screenshots/" },
+    ],
+  },
+];
