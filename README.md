@@ -48,16 +48,14 @@ Scenarios live in `prototype/scenarios.js`; the preview logic is in
 By default, participants download a JSON file at the end. To collect into a
 Google Sheet instead:
 
-1. Create a Sheet, then open Extensions → Apps Script and paste:
-   ```js
-   function doPost(e) {
-     const d = JSON.parse(e.postData.contents);
-     SpreadsheetApp.getActiveSheet().appendRow([new Date(), d.id, d.group, e.postData.contents]);
-     return ContentService.createTextOutput("ok");
-   }
-   ```
+1. Create a Sheet, then open Extensions → Apps Script and replace the code with
+   [`survey/collect_responses.gs`](survey/collect_responses.gs).
 2. Deploy → New deployment → Web app, execute as yourself, access "Anyone".
 3. Paste the web app URL into `submitUrl` in `prototype/config.js`.
+
+Each response adds a row to the `responses` tab (background, ratings,
+preference) and one row per scenario to the `trials` tab (decision, correct,
+time, confidence), ready for a pivot table.
 
 Before surveying people outside the team, check with the professor whether
 this needs IRB review.
