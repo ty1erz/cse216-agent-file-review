@@ -61,6 +61,16 @@
     return (HARNESSES.find((item) => item.id === id) || HARNESSES[0]).name;
   }
 
+  function downloadResponse(s) {
+    const blob = new Blob([JSON.stringify(s, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = h("a", { href: url, download: `response-${s.id.slice(0, 8)}.json` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   // ---------- review screens ----------
 
   function requestCard(sc) {
@@ -88,6 +98,8 @@
     if (sum.moved) chips.push(chip("mov", `Moves ${sum.moved} file${sum.moved > 1 ? "s" : ""}`));
     if (sum.created) chips.push(chip("new", `Creates ${sum.created} file${sum.created > 1 ? "s" : ""}`));
     if (sum.folders) chips.push(chip("new", `Creates ${sum.folders} folder${sum.folders > 1 ? "s" : ""}`));
+    if (sum.foldersDeleted) chips.push(chip("del", `Deletes ${sum.foldersDeleted} folder${sum.foldersDeleted > 1 ? "s" : ""}`));
+    if (sum.foldersMoved) chips.push(chip("mov", `Moves ${sum.foldersMoved} folder${sum.foldersMoved > 1 ? "s" : ""}`));
     if (sum.overwritten) chips.push(chip("ovr", `Overwrites ${sum.overwritten} existing file${sum.overwritten > 1 ? "s" : ""}`));
     chips.push(sum.irreversible ? chip("warn", "Cannot be undone") : chip("ok", "Nothing is lost"));
     if (!sc.scope.length) chips.push(chip("neutral", "No folder named in the request"));
@@ -152,7 +164,8 @@
       }
       return [...kids].sort((a, b) => (allDirs.has(b) - allDirs.has(a)) || a.localeCompare(b));
     };
-    const changedUnder = (dir) => [...allFiles].some((p) => p.startsWith(dir + "/") && fileStatus(p).cls !== "same");
+    const changedUnder = (dir) => [...allFiles].some((p) => p.startsWith(dir + "/") && fileStatus(p).cls !== "same")
+      || [...allDirs].some((p) => p.startsWith(dir + "/") && before.isDir(p) !== after.isDir(p));
 
     const rows = [];
     function walk(dir, depth) {
@@ -190,6 +203,14 @@
     const moves = result.effects.filter((e) => e.type === "move");
     const deletes = result.effects.filter((e) => e.type === "delete");
     const parts = [];
+    const directories = result.effects.filter((e) => e.kind === "directory" || e.type === "mkdir");
+    if (directories.length) {
+      parts.push(h("div", { class: "panel" },
+        h("div", { class: "panel-title" }, "Folder changes"),
+        h("ul", {}, directories.map((e) => h("li", { class: Engine.outsideScope(e, sc.scope) ? "out" : "" },
+          e.type === "delete-dir" ? `Delete ${e.path}/`
+            : e.type === "move-dir" ? `Move ${e.from}/ → ${e.path}/` : `Create ${e.path}/`)))));
+    }
 
     if (replaced.length) {
       parts.push(h("div", { class: "panel" },
@@ -285,10 +306,13 @@
         h("h1", {}, "Reviewing AI agent file operations"),
         h("p", { class: "lede" }, "A CSE 216 prototype. An AI assistant proposes a command that deletes, copies or moves files. You decide whether to let it run. The same plain prompt and file-by-file preview are tested inside OpenHands, Cline and Codex CLI interfaces."),
         h("div", { class: "cards" },
-          h("a", { class: "card", href: "#try" }, h("h2", {}, "Try the prototype"), h("p", {}, "Type any rm, cp or mv command against a mock file system and see what it would do before you approve it.")),
+          h("a", { class: "card", href: "#try" }, h("h2", {}, "Try the prototype"), h("p", {}, "Ask the agent to change mock files and review its proposed commands before approving.")),
           h("a", { class: "card", href: "#survey" }, h("h2", {}, "Take the survey"), h("p", {}, "About 10 minutes, anonymous. Review 8 commands and tell us what you'd do.")),
           h("a", { class: "card", href: "#demo" }, h("h2", {}, "Explore the demo"), h("p", {}, "Browse every scenario, switch screens and agent interfaces, and see the answer key."))),
-        h("p", { class: "fine" }, "All files shown are made up. Nothing runs on your computer.")));
+        h("p", { class: "fine" }, "All files shown are made up. Nothing runs on your computer."),
+        ...window.SurveySubmission.pending().map((s) => h("div", { class: "panel" },
+          h("p", {}, "A previous survey has an unconfirmed submission. Download the backup and send it to the team."),
+          h("button", { onclick: () => downloadResponse(s) }, `Download response ${s.id.slice(0, 8)}`)))));
   }
 
   // ---------- demo ----------
@@ -346,7 +370,8 @@
     const plain = { condition: "baseline", scenarios: shuffle(window.SCENARIOS.filter((s) => s.set === plainSet)) };
     const rich = { condition: "structured", scenarios: shuffle(window.SCENARIOS.filter((s) => s.set !== plainSet)) };
     return {
-      id: (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)),
+      id: (crypto.randomUUID ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)),
+        (byte) => byte.toString(16).padStart(2, "0")).join("")),
       version: window.SURVEY_CONFIG.version,
       group,
       harness,
@@ -443,7 +468,7 @@
   }
 
   function trialStep(s, sc, condition, practice, next) {
-    const shownAt = performance.now();
+    let shownAt;
     const trial = { scenario: sc.id, condition, harness: s.harness, practice };
     const followup = h("div", { class: "followup" });
     const buttons = h("div", { class: "decide" },
@@ -451,7 +476,7 @@
         h("button", { class: "decision decision-" + v, onclick: () => decide(v) }, label)));
 
     function decide(v) {
-      if (trial.decision == null) trial.ms = Math.round(performance.now() - shownAt);
+      trial.ms = Math.round(performance.now() - shownAt);
       trial.decision = v;
       trial.correct = (v === "approve") === sc.matches;
       for (const b of buttons.children) b.classList.toggle("picked", b.classList.contains("decision-" + v));
@@ -462,6 +487,7 @@
       const go = h("button", { class: "primary", disabled: trial.confidence == null, onclick: () => { if (!practice) s.trials.push(trial); next(); } }, "Next");
       const note = h("textarea", {
         rows: 2,
+        maxlength: 1000,
         placeholder: trial.decision === "change" ? "What should the assistant do instead?" : "Optional: what made you decide?",
         oninput: (e) => { trial.comment = e.target.value; },
       });
@@ -478,12 +504,14 @@
         h("div", { class: "actions" }, go));
     }
 
-    return h("main", { class: "trial" },
+    const screen = h("main", { class: "trial" },
       practice ? h("div", { class: "eyebrow" }, "Practice (not scored)") : null,
       requestCard(sc),
       harnessView(sc, condition, s.harness),
       buttons,
       followup);
+    shownAt = performance.now();
+    return screen;
   }
 
   function ratingStep(s, condition, next) {
@@ -511,9 +539,9 @@
       h("p", { class: "q" }, "Which screen would you rather use when an assistant changes your files?"),
       choice("prefer", ["The plain prompt", "The file preview", "No preference"], (v) => { s.final.prefer = v; go.disabled = false; }),
       h("p", { class: "q" }, "Why? (optional)"),
-      h("textarea", { rows: 3, oninput: (e) => { s.final.why = e.target.value; } }),
+      h("textarea", { rows: 3, maxlength: 2000, oninput: (e) => { s.final.why = e.target.value; } }),
       h("p", { class: "q" }, "Was anything confusing or missing in the file preview? (optional)"),
-      h("textarea", { rows: 3, oninput: (e) => { s.final.missing = e.target.value; } }),
+      h("textarea", { rows: 3, maxlength: 2000, oninput: (e) => { s.final.missing = e.target.value; } }),
       h("div", { class: "actions" }, go));
   }
 
@@ -521,22 +549,17 @@
     s.finishedAt = new Date().toISOString();
     const status = h("p", { class: "status" });
     const url = window.SURVEY_CONFIG.submitUrl;
+    const backedUp = window.SurveySubmission.backup(s);
     if (url) {
       status.textContent = "Sending your responses…";
-      fetch(url, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(s) })
-        .then(() => { status.textContent = "Your responses were sent. Thank you!"; })
-        .catch(() => { status.textContent = "Sending failed. Please download your responses and send the file to the team."; });
+      window.SurveySubmission.submit(s, url).then(({ saved }) => {
+        status.textContent = saved ? "Your responses were saved. Thank you!"
+          : "We couldn't confirm that your responses were saved. Please download them below and send the file to the team."
+            + (backedUp ? " A backup is also available on this browser's home page." : "");
+      });
     } else {
       status.textContent = "Response collection isn't set up yet. Please download your responses and send the file to the team.";
     }
-
-    const download = () => {
-      const blob = new Blob([JSON.stringify(s, null, 2)], { type: "application/json" });
-      const a = h("a", { href: URL.createObjectURL(blob), download: `response-${s.id.slice(0, 8)}.json` });
-      document.body.append(a);
-      a.click();
-      a.remove();
-    };
 
     const problems = s.trials.filter((t) => !window.SCENARIOS.find((x) => x.id === t.scenario).matches);
     const caught = problems.filter((t) => t.correct).length;
@@ -545,7 +568,7 @@
       h("h1", {}, "Thank you!"),
       h("p", { class: "assigned-harness" }, `You completed the ${harnessName(s.harness)} interface version.`),
       status,
-      h("div", { class: "actions left" }, h("button", { onclick: download }, "Download my responses")),
+      h("div", { class: "actions left" }, h("button", { onclick: () => downloadResponse(s) }, "Download my responses")),
       h("h2", {}, `You caught ${caught} of ${problems.length} problem commands`),
       h("p", {}, "Here's what each command actually did:"),
       h("ol", { class: "answers" }, s.trials.map((t) => {
@@ -563,9 +586,12 @@
   // shared with playground.js
   window.UI = { h, baselineView, structuredView, fmtSize, fmtDate, chip };
 
+  let dispose;
   function route() {
+    if (typeof dispose === "function") dispose();
+    dispose = null;
     const r = location.hash.replace("#", "");
-    if (r === "try") window.Playground(app);
+    if (r === "try") dispose = window.Playground(app);
     else if (r === "demo") demo();
     else if (r === "survey") survey();
     else home();

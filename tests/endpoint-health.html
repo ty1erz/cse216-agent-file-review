@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Read-only endpoint health check</title>
+<h1>Read-only endpoint health check</h1>
+<p>These checks send GET requests only. They do not call the model or store survey responses.</p>
+<button id="check">Check configured endpoints</button>
+<pre id="result" role="status"></pre>
+<script src="../prototype/config.js"></script>
+<script>
+  document.getElementById("check").onclick = async () => {
+    const output = document.getElementById("result");
+    output.textContent = "Checking…";
+    const urls = [new URL(window.SURVEY_CONFIG.agentUrl), new URL(window.SURVEY_CONFIG.submitUrl)];
+    urls[1].searchParams.set("receipt", "local-health-check-00000000");
+    const results = await Promise.all(urls.map(async (url, i) => {
+      try {
+        const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(10000) });
+        return `${i ? "collector" : "model proxy"}: HTTP ${response.status}, ${await response.text()}`;
+      } catch (error) { return `${i ? "collector" : "model proxy"}: ${error.message}`; }
+    }));
+    output.textContent = results.join("\n");
+  };
+</script>
+</html>

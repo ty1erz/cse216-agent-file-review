@@ -36,21 +36,29 @@ versus preview comparison.
 ## Recorded measures
 
 - approve, reject or request-change decision;
-- correctness against the scenario answer key;
+- binary approval accuracy against the scenario answer key: approve a matching
+  command, or decline a mismatching command (reject and request change both
+  count as declining; preserve the selected action for separate analysis);
 - response time and confidence;
 - perceived visibility, confidence, ease and information load;
 - screen preference and free-text comments;
 - assigned harness, survey version and counterbalancing group.
 
 Practice trials are not included in the submitted trial rows.
+Response time runs from the constructed trial screen to the final selected
+decision, including any change of mind before advancing.
+The live prompt-driven `#try` demonstration is separate from the fixed survey.
 
 ## Deployment checklist
 
 1. Inspect all scenarios and answer keys in `#demo`.
 2. Update and redeploy `survey/collect_responses.gs` so `harness` receives its
-   own Sheet column.
+   own Sheet column and `?receipt=<id>` confirms a complete saved response.
 3. Merge the integration branch into `main`; GitHub Pages publishes only
    `main`.
 4. Run one test response per fixed harness link and confirm both `responses`
-   and `trials` rows contain the expected harness.
+   and `trials` rows contain the expected harness. Verify a matching receipt
+   returns `saved: true` and the page says the response was saved. Test with
+   the collector unavailable as well: the page must offer the downloadable
+   response and keep its local backup without reporting success.
 5. Delete those test rows before distributing the survey.

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>File review local test fixture</title>
+<link rel="stylesheet" href="../prototype/styles.css">
+<body>
+<p>Local test fixture: model and collector are simulated. No requests leave this page.</p>
+<div id="app"></div>
+<output id="test-result" aria-live="polite"></output>
+<script>
+  window.SURVEY_CONFIG = { version: "local-test", submitUrl: "https://fixture.test/collector", agentUrl: "https://fixture.test/agent" };
+  let saved;
+  window.fetch = async (url, options = {}) => {
+    if (String(url).includes("/agent")) return {
+      ok: true, text: async () => JSON.stringify({ reply: "I will remove one temporary build file.", model: "local fixture",
+        commands: [{ command: "rm build/cache-1.tmp", purpose: "Delete the temporary build file." }] }),
+    };
+    if (options.method === "POST") {
+      saved = JSON.parse(options.body);
+      document.getElementById("test-result").textContent = JSON.stringify({
+        harness: saved.harness, trials: saved.trials.length, trialHarnesses: [...new Set(saved.trials.map(t => t.harness))],
+        conditions: saved.trials.map(t => t.condition), version: saved.version,
+      });
+      return { type: "opaque", status: 0 };
+    }
+    return { ok: true, json: async () => ({ ok: true, saved: !!saved, id: saved?.id }) };
+  };
+</script>
+<script src="../prototype/engine.js"></script>
+<script src="../prototype/scenarios.js"></script>
+<script src="../prototype/playground.js"></script>
+<script src="../prototype/submission.js"></script>
+<script src="../prototype/app.js"></script>
+</body>
+</html>
