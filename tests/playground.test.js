@@ -32,6 +32,10 @@ test("classifier only permits simulated mutations and explicit read-only command
   const { classify } = loadInternals();
 
   assert.equal(classify('rm "file with spaces.txt"').kind, "previewable");
+  // The engine tokenizes escapes and a leading ~/ exactly, so these are previewed.
+  assert.equal(classify("rm file\\ name.txt").kind, "previewable");
+  assert.equal(classify("mv Desktop/Screenshot\\ 2026-10-21*.png Desktop/screenshots/").kind, "previewable");
+  assert.equal(classify("rm ~/*.tmp").kind, "previewable");
   assert.equal(classify('echo "rm important.txt > gone"').kind, "readonly");
   assert.equal(classify("git status --short").kind, "readonly");
 
@@ -42,12 +46,11 @@ test("classifier only permits simulated mutations and explicit read-only command
     "env rm important.txt",
     "MODE=test rm important.txt",
     "/bin/rm important.txt",
-    "rm file\\ name.txt",
     "rm $TARGET",
-    "rm ~/*.tmp",
     'echo "$(rm important.txt)"',
     'echo "`rm important.txt`"',
-    "find . -delete",
+    "find . -exec bash -c 'rm \"$1\"' _ {} \\;",
+    "find . -name '*.tmp' | xargs rm",
     "rg --pre 'python cleanup.py' needle",
     "git clean -fd",
     "git diff --ext-diff",
@@ -122,13 +125,32 @@ test("known-success read-only steps can precede a faithfully simulated change", 
 test("unknown read-only exit status cannot control a destructive && step", () => {
   const { simulateSequence } = loadInternals();
   const files = [{ path: "keep.txt", size: 1 }];
-  const result = simulateSequence("cat missing.txt && rm keep.txt", files);
+  // grep's exit status depends on file contents the mock does not have
+  const result = simulateSequence("grep -q needle keep.txt && rm keep.txt", files);
 
   assert.equal(result.blocked, true);
   assert.equal(result.steps[0].success, null);
   assert.equal(result.steps[1].skipped, true);
   assert.match(result.steps[1].skipReason, /exit status/);
   assert.equal(result.finalFiles.some((file) => file.path === "keep.txt"), true);
+});
+
+test("read-only steps that read paths succeed exactly when the paths exist", () => {
+  const { simulateSequence } = loadInternals();
+  const files = [{ path: "keep.txt", size: 1 }, { path: "old/a.txt", size: 2 }];
+
+  const missing = simulateSequence("cat missing.txt && rm keep.txt", files);
+  assert.equal(missing.steps[0].success, false);
+  assert.match(missing.steps[1].skipReason, /previous command failed/);
+  assert.equal(missing.blocked, true);
+
+  const present = simulateSequence("ls old && rm -r old", files);
+  assert.equal(present.blocked, false);
+  assert.equal(present.finalFiles.some((file) => file.path.startsWith("old")), false);
+
+  const fallback = simulateSequence("rmdir old 2>/dev/null || rm -r old", files);
+  assert.equal(fallback.steps[1].skipped, undefined);
+  assert.equal(fallback.finalFiles.some((file) => file.path.startsWith("old")), false);
 });
 
 test("request coordinator invalidates and aborts stale work", () => {
@@ -167,3 +189,37 @@ test("model proxy timeout returns an actionable error", async () => {
   assert.equal(result.error, "timeout");
 });
 
+
+test("find and for loops are previewed as the exact commands they run", () => {
+  const { classify, simulateSequence } = loadInternals();
+  const files = [
+    { path: "logs/a.log", size: 1, mtime: "2026-10-18" },
+    { path: "logs/b.log", size: 2, mtime: "2026-10-23" },
+    { path: "logs/keep.txt", size: 3, mtime: "2026-10-01" },
+    { path: "pics/Shot 1.png", size: 4 },
+    { path: "pics/Shot 2.png", size: 5 },
+    { path: "empty/" },
+  ];
+
+  assert.equal(classify("find logs -name '*.log' -print").kind, "readonly");
+  assert.equal(classify("find logs -name '*.log' | sort").kind, "readonly");
+
+  // -mtime +2: older than two whole days before Oct 23
+  const old = simulateSequence("find logs -name '*.log' -mtime +2 -delete", files);
+  assert.equal(old.blocked, false);
+  assert.deepEqual(Array.from(old.finalFiles, (f) => f.path).filter((p) => p.startsWith("logs/")).sort(), ["logs/b.log", "logs/keep.txt"]);
+
+  const exec = simulateSequence("mkdir done && find pics -type f -exec mv {} done/ \\;", files);
+  assert.equal(exec.blocked, false);
+  assert.equal(exec.steps[1].r.ran.length, 2);
+
+  const loop = simulateSequence('for f in pics/*.png; do\n  mv "$f" "${f// /_}"\ndone', files);
+  assert.equal(loop.steps.length, 1);
+  assert.equal(loop.blocked, false);
+  assert.deepEqual(Array.from(loop.finalFiles, (f) => f.path).filter((p) => p.startsWith("pics/")).sort(), ["pics/Shot_1.png", "pics/Shot_2.png"]);
+
+  // deleting everything, the home folder included, stays blocked
+  assert.equal(simulateSequence("find . -delete", files).blocked, true);
+  // loop bodies may only use the loop variable
+  assert.equal(simulateSequence('for f in pics/*; do mv "$f" "$DEST"; done', files).blocked, true);
+});

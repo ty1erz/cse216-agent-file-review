@@ -1,0 +1,258 @@
+{
+ "today": "Fri, Oct 23, 2026",
+ "files": [
+  {
+   "path": "build/app.js",
+   "size": 184000,
+   "mtime": "2026-10-23"
+  },
+  {
+   "path": "build/app.js.map",
+   "size": 402000,
+   "mtime": "2026-10-23"
+  },
+  {
+   "path": "build/cache-1.tmp",
+   "size": 52000,
+   "mtime": "2026-10-23"
+  },
+  {
+   "path": "build/cache-2.tmp",
+   "size": 48000,
+   "mtime": "2026-10-23"
+  },
+  {
+   "path": "build/cache-3.tmp",
+   "size": 61000,
+   "mtime": "2026-10-23"
+  },
+  {
+   "path": "src/index.js",
+   "size": 4100,
+   "mtime": "2026-10-22"
+  },
+  {
+   "path": "src/util.js",
+   "size": 2200,
+   "mtime": "2026-10-20"
+  },
+  {
+   "path": "README.md",
+   "size": 1800,
+   "mtime": "2026-09-30"
+  },
+  {
+   "path": "docs/drafts/intro_v1.md",
+   "size": 8200,
+   "mtime": "2026-09-02"
+  },
+  {
+   "path": "docs/drafts/intro_v2.md",
+   "size": 9100,
+   "mtime": "2026-09-15"
+  },
+  {
+   "path": "docs/drafts/outline.md",
+   "size": 3300,
+   "mtime": "2026-08-28"
+  },
+  {
+   "path": "docs/final/thesis.pdf",
+   "size": 2480000,
+   "mtime": "2026-10-21"
+  },
+  {
+   "path": "docs/final/thesis.docx",
+   "size": 940000,
+   "mtime": "2026-10-21"
+  },
+  {
+   "path": "docs/figures/fig1.png",
+   "size": 310000,
+   "mtime": "2026-10-10"
+  },
+  {
+   "path": "docs/figures/fig2.png",
+   "size": 285000,
+   "mtime": "2026-10-10"
+  },
+  {
+   "path": "notes.txt",
+   "size": 1200,
+   "mtime": "2026-10-18"
+  },
+  {
+   "path": "logs/server-2026-10-20.log",
+   "size": 1200000,
+   "mtime": "2026-10-20"
+  },
+  {
+   "path": "logs/server-2026-10-21.log",
+   "size": 1350000,
+   "mtime": "2026-10-21"
+  },
+  {
+   "path": "logs/server-2026-10-22.log",
+   "size": 990000,
+   "mtime": "2026-10-22"
+  },
+  {
+   "path": "logs/server-2026-10-23.log",
+   "size": 640000,
+   "mtime": "2026-10-23"
+  },
+  {
+   "path": "logs/README.md",
+   "size": 900,
+   "mtime": "2026-07-01"
+  },
+  {
+   "path": "app/main.py",
+   "size": 7400,
+   "mtime": "2026-10-22"
+  },
+  {
+   "path": "config/app.yaml",
+   "size": 2100,
+   "mtime": "2026-10-12"
+  },
+  {
+   "path": "config/db.yaml",
+   "size": 900,
+   "mtime": "2026-10-12"
+  },
+  {
+   "path": "config/cache.yaml",
+   "size": 600,
+   "mtime": "2026-09-30"
+  },
+  {
+   "path": "backup/"
+  },
+  {
+   "path": "src/server.py",
+   "size": 12000,
+   "mtime": "2026-10-22"
+  },
+  {
+   "path": "camera/IMG_0001.jpg",
+   "size": 4200000,
+   "mtime": "2026-10-22"
+  },
+  {
+   "path": "camera/IMG_0002.jpg",
+   "size": 3900000,
+   "mtime": "2026-10-22"
+  },
+  {
+   "path": "camera/IMG_0003.jpg",
+   "size": 4100000,
+   "mtime": "2026-10-22"
+  },
+  {
+   "path": "photos/IMG_0001.jpg",
+   "size": 3600000,
+   "mtime": "2025-06-14",
+   "note": "Beach trip"
+  },
+  {
+   "path": "photos/IMG_0002.jpg",
+   "size": 3700000,
+   "mtime": "2025-06-14",
+   "note": "Beach trip"
+  },
+  {
+   "path": "photos/IMG_0871.jpg",
+   "size": 3500000,
+   "mtime": "2026-03-02"
+  },
+  {
+   "path": "photos/IMG_0872.jpg",
+   "size": 3400000,
+   "mtime": "2026-03-02"
+  },
+  {
+   "path": "reports/report_v1.docx",
+   "size": 310000,
+   "mtime": "2026-10-01"
+  },
+  {
+   "path": "reports/report_v2.docx",
+   "size": 342000,
+   "mtime": "2026-10-20"
+  },
+  {
+   "path": "reports/data.xlsx",
+   "size": 88000,
+   "mtime": "2026-10-19"
+  },
+  {
+   "path": "Downloads/invoice_04.pdf",
+   "size": 120000,
+   "mtime": "2026-10-05"
+  },
+  {
+   "path": "Downloads/invoice_05.pdf",
+   "size": 118000,
+   "mtime": "2026-10-19"
+  },
+  {
+   "path": "Downloads/tax_return_2025.pdf",
+   "size": 640000,
+   "mtime": "2026-04-11"
+  },
+  {
+   "path": "Downloads/boarding_pass_SAN.pdf",
+   "size": 90000,
+   "mtime": "2026-10-22"
+  },
+  {
+   "path": "Downloads/setup.dmg",
+   "size": 84000000,
+   "mtime": "2026-10-15"
+  },
+  {
+   "path": "finance/2026/invoice_01.pdf",
+   "size": 121000,
+   "mtime": "2026-01-08"
+  },
+  {
+   "path": "finance/2026/invoice_02.pdf",
+   "size": 119000,
+   "mtime": "2026-04-03"
+  },
+  {
+   "path": "finance/2026/invoice_03.pdf",
+   "size": 117000,
+   "mtime": "2026-07-09"
+  },
+  {
+   "path": "Desktop/Screenshot 2026-10-21 at 09.14.png",
+   "size": 820000,
+   "mtime": "2026-10-21"
+  },
+  {
+   "path": "Desktop/Screenshot 2026-10-22 at 13.02.png",
+   "size": 760000,
+   "mtime": "2026-10-22"
+  },
+  {
+   "path": "Desktop/Screenshot 2026-10-23 at 08.47.png",
+   "size": 905000,
+   "mtime": "2026-10-23"
+  },
+  {
+   "path": "Desktop/todo.txt",
+   "size": 400,
+   "mtime": "2026-10-23"
+  },
+  {
+   "path": "Desktop/resume.pdf",
+   "size": 210000,
+   "mtime": "2026-09-12"
+  },
+  {
+   "path": "Desktop/screenshots/"
+  }
+ ]
+}

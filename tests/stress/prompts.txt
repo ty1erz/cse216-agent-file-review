@@ -1,0 +1,57 @@
+# One request per line. Blank lines and lines starting with # are ignored.
+# delete
+Delete my drafts in docs/drafts, I don't need them anymore
+Delete all the .tmp files in build
+Clean up old log files but keep today's
+Remove the setup.dmg installer from Downloads
+Delete everything in the build folder
+Get rid of the boarding pass, my flight is over
+Delete the empty folders
+Delete all screenshots older than today
+Free up space by removing the biggest file in Downloads
+Delete the source map file
+# copy
+Copy the new photos from camera into my photos library
+Back up the config files into backup before I edit them
+Make a backup copy of my thesis
+Copy my resume to Downloads so I can upload it
+Duplicate the reports folder as reports_old
+Copy all PDFs on my Desktop and Downloads into a new folder called pdfs
+Copy the figures into docs/final
+# move
+Move the invoice PDFs from Downloads into finance/2026
+Put my screenshots into a folder by date
+Move all the screenshots on my Desktop into Desktop/screenshots
+Move my tax return into the finance folder
+Move todo.txt into the notes folder
+Organize my Downloads folder by file type
+Move the old logs into an archive folder
+Move everything from camera into photos and remove the camera folder
+# rename
+Rename report_v2.docx to report_final.docx
+Rename the screenshots so they don't have spaces in their names
+Rename all the drafts to start with old_
+Rename IMG_0001.jpg to beach.jpg
+Add today's date to the thesis file names
+# combined / vague
+Tidy up my Desktop
+Clean up my home folder
+Archive the logs and delete the originals
+Get my Downloads ready for a fresh start
+Make my files more organized
+Prepare a clean build: delete build output and temporary files
+Move my finished thesis to the Desktop and delete the drafts
+Put all invoices in one place and sort them by month
+# read-only
+How much space are my photos using?
+Which files did I change today?
+Show me what's in the logs folder
+Is there anything in the backup folder?
+List all the PDF files I have
+# risky or tricky
+Delete everything except my thesis
+Wipe the docs folder
+Delete all files with 'old' or 'v1' in the name
+Replace the photos in photos/ with the ones from camera
+Move all PDFs into finance/2026, even the non-invoices
+Remove duplicates between camera and photos

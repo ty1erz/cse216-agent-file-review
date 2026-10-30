@@ -30,9 +30,13 @@ Then open http://localhost:8216. Three modes:
 
 - `#try`: the interactive prototype. Type a request in plain English. A model
   sees the mock file tree and proposes the shell commands an agent would run.
-  The page distinguishes supported file changes (`rm`, `cp`, `mv`, `mkdir`),
-  an explicit set of read-only commands, and commands it cannot preview.
-  Unsupported commands or syntax block Approve. Approve applies the change to
+  The page distinguishes supported file changes, an explicit set of read-only
+  commands, and commands it cannot preview. Supported changes are `rm`, `cp`,
+  `mv`, `mkdir`, `rmdir` and `tar -c` (with common flags such as `-r`, `-n`,
+  `-u`, `-a` and `-t DIR`), plus `find` with `-delete` or `-exec rm/mv/cp {}`
+  and simple `for f in ...; do ...; done` loops, which are previewed as the
+  exact commands they expand to. Read-only pipelines (`find ... | sort`),
+  `2>/dev/null` and `||` are understood. Anything else blocks Approve. Approve applies the change to
   the mock files, and Undo reverts it. You can edit the agent's commands, or
   type your own when the model isn't connected.
 - `#demo`: every survey scenario, with selectors for the confirmation screen
@@ -126,6 +130,18 @@ Run `npm test` with Node.js 20 or later; no packages need installing. Tests
 cover the command preview engine, command classification, async request state,
 survey collector and storage confirmation. CI runs them on every push and PR.
 For a manual check, open `#try`, `#demo`, and each fixed harness survey link.
+
+`tests/model-plans.test.js` replays real model plans saved in
+`tests/stress/plans*.json` and fails if any of them stops previewing. To
+collect a new batch and see what blocks (needs a TritonAI key in `.env`):
+
+```bash
+python3 -I tests/stress/generate_plans.py tests/stress/plans-new.json api-glm-5.3-flash
+node tests/stress/replay.js tests/stress/plans-new.json --verbose
+```
+
+Requests live in `tests/stress/prompts.txt`; the workspace is the home folder
+from `prototype/scenarios.js` (`node tests/stress/dump_workspace.js`).
 The interactive prototype is a separate demonstration; only `#survey` records
 study decisions. The study uses its displayed reference date for every file.
 

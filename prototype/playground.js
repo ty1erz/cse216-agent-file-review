@@ -49,9 +49,10 @@
       if (c === "\\") { cur += c; escaped = true; continue; }
       if (quote) { if (c === quote) quote = null; cur += c; continue; }
       if (c === '"' || c === "'") { quote = c; cur += c; continue; }
-      if (c === "&" && line[i + 1] === "&") {
-        if (!pushCommand()) parseError ||= "The command has && without a command before it.";
-        else nextConnector = "&&";
+      if ((c === "&" && line[i + 1] === "&") || (c === "|" && line[i + 1] === "|")) {
+        const op = c + c;
+        if (!pushCommand()) parseError ||= `The command has ${op} without a command before it.`;
+        else nextConnector = op;
         i++;
         continue;
       }
@@ -67,18 +68,70 @@
       cur += c;
     }
     const endedWithCommand = pushCommand();
-    if (!endedWithCommand && nextConnector === "&&") parseError ||= "The command ends with && and has no following command.";
+    if (!endedWithCommand && (nextConnector === "&&" || nextConnector === "||")) {
+      parseError ||= `The command ends with ${nextConnector} and has no following command.`;
+    }
     if (quote || escaped) parseError ||= "The command contains an unfinished quote or escape.";
-    if (parseError) parts.parseError = parseError;
-    return parts;
+
+    // Keep `for ... do ... done` together as one step; the engine unrolls it.
+    const grouped = [];
+    for (let i = 0; i < parts.length; i++) {
+      if (!/^for\s/.test(parts[i].cmd)) { grouped.push(parts[i]); continue; }
+      let text = parts[i].cmd;
+      let j = i;
+      while (!/(^|[\s;])done$/.test(text) && j + 1 < parts.length) {
+        j++;
+        text += (parts[j].connector === "&&" ? " && " : "; ") + parts[j].cmd;
+      }
+      if (!/(^|[\s;])done$/.test(text)) parseError ||= "The for loop has no done.";
+      grouped.push({ cmd: text, connector: parts[i].connector });
+      i = j;
+    }
+    if (parseError) grouped.parseError = parseError;
+    return grouped;
+  }
+
+  // Remove redirections to /dev/null (and 2>&1), which discard output without
+  // touching files. `masked` lines up character for character with `command`.
+  function stripNullRedirects(command) {
+    const masked = maskQuoted(command).text;
+    const re = /\s*(?:[0-9]?>>?|&>>?)\s*\/dev\/null\b|\s*[0-9]>&[0-9]/g;
+    let out = "", last = 0, m;
+    while ((m = re.exec(masked))) { out += command.slice(last, m.index); last = m.index + m[0].length; }
+    return (out + command.slice(last)).trim();
+  }
+
+  // Exit status of a read-only command in the mock: listing or reading paths
+  // succeeds exactly when they exist. Unknown for anything else.
+  const PATH_READERS = new Set(["ls", "cat", "stat", "du", "wc", "head", "tail", "file", "tree"]);
+  function readonlyStatus(command, files) {
+    const words = commandWords(command);
+    const name = words[0];
+    if (name === "true" || name === "echo" || name === "printf" || name === "pwd") return true;
+    if (name === "find") {
+      const r = Engine.runFind(files, command);
+      return r.error ? null : !r.errors.length;
+    }
+    if (!PATH_READERS.has(name)) return null;
+    const tree = new Engine.FileTree(files);
+    const paths = words.slice(1).filter((w, i, all) => !w.startsWith("-") && !/^-[nc]$/.test(all[i - 1] || ""));
+    try {
+      return paths.every((p) => Engine.expand(tree, p).every((x) => tree.exists(x)));
+    } catch (err) {
+      return null;
+    }
   }
 
   function splitCommands(line) {
     return parseCommandSequence(line).map((part) => part.cmd);
   }
 
-  const PREVIEWABLE = new Set(["rm", "cp", "mv", "mkdir"]);
-  const READ_ONLY = new Set(["ls", "pwd", "cat", "head", "tail", "stat", "file", "du", "wc", "grep", "rg", "echo", "printf", "true"]);
+  const PREVIEWABLE = new Set(["rm", "cp", "mv", "mkdir", "rmdir", "tar", "gzip"]);
+  const READ_ONLY = new Set(["ls", "pwd", "cat", "head", "tail", "stat", "file", "du", "wc", "grep", "rg", "echo", "printf", "true",
+    "sort", "uniq", "cut", "tr", "tree", "basename", "dirname", "date", "which", "realpath", "readlink",
+    "shasum", "sha256sum", "md5", "md5sum", "cmp", "diff", "test", "["]);
+  // Read-only commands whose options can still write a file or change state.
+  const WRITING_OPTIONS = { sort: /^(-o|--output)/, tree: /^-o/, date: /^(-s|--set)/ };
   const SAFE_GIT = new Set(["status", "diff", "log", "show", "rev-parse", "ls-files"]);
 
   // Replace quoted text with spaces so shell operators inside a filename or a
@@ -118,15 +171,55 @@
 
   // previewable: we can simulate it. changes: it is not proven read-only and
   // must be blocked. readonly: an explicitly supported read-only command.
+  // compound: a for loop or a find with -delete/-exec, previewed by expanding it
+  // into the simple commands it runs (see simulateSequence).
   function classify(command) {
+    command = stripNullRedirects(command);
     const masked = maskQuoted(command);
     const words = commandWords(command);
     const name = words[0] || "";
-    const unsupportedShell = /&&|;|\n|\|\||[|`<>$~{}#]|(^|[^&])&(?!&)/.test(masked.text);
     if (!masked.complete) return { kind: "changes", name, reason: "has unfinished quoting" };
     if (!name) return { kind: "changes", name, reason: "is empty" };
-    if (masked.hasEscape) return { kind: "changes", name, reason: "uses backslash escaping this prototype does not simulate" };
+
+    if (name === "for") {
+      return /\$\(|`/.test(masked.text) && !/\$\(\s*(basename|dirname)\s/.test(command)
+        ? { kind: "changes", name, reason: "runs other commands inside its loop" }
+        : { kind: "compound", name };
+    }
+    // A pipeline is read-only when every stage is.
+    if (/(^|[^|])\|(?!\|)/.test(masked.text)) {
+      const stages = [];
+      let start = 0;
+      for (let i = 0; i < masked.text.length; i++) {
+        if (masked.text[i] === "|" && masked.text[i + 1] !== "|" && masked.text[i - 1] !== "|") { stages.push(command.slice(start, i)); start = i + 1; }
+      }
+      stages.push(command.slice(start));
+      const kinds = stages.map((stage) => classify(stage.trim()));
+      if (kinds.every((k) => k.kind === "readonly")) return { kind: "readonly", name, pipeline: true };
+      return { kind: "changes", name, reason: "pipes output into a command that may change files" };
+    }
+
+    if (name === "find") {
+      // {} and \; are find's own syntax, not shell operators
+      if (/&&|;|\n|\|\||[|`<>$#]|(^|[^&])&(?!&)/.test(masked.text.replace(/(^|\s)\{\}(?=\s|$)/g, "$1  "))) {
+        return { kind: "changes", name, reason: "uses shell syntax this prototype cannot safely preview" };
+      }
+      const r = Engine.runFind([], command, { syntaxOnly: true });
+      if (r.error) return { kind: "changes", name, reason: r.error.replace(/^find: /, "uses ") };
+      return r.readonly ? { kind: "readonly", name } : { kind: "compound", name };
+    }
+
+    // Backslash escapes and a leading ~/ are fine: the engine's tokenizer models
+    // them exactly (an escaped character is literal, like a quoted one).
+    const unsupportedShell = /&&|;|\n|\|\||[|`<>${}#]|(^|[^&])&(?!&)/.test(masked.text);
     if (unsupportedShell) return { kind: "changes", name, reason: "uses shell syntax this prototype cannot safely preview" };
+    // tar -t only lists an archive
+    if (name === "tar" && /^-?[a-zA-Z]*t[a-zA-Z]*$/.test(words[1] || "") && !/[cxru]/.test(words[1])) {
+      return { kind: "readonly", name };
+    }
+    if (WRITING_OPTIONS[name] && words.slice(1).some((w) => WRITING_OPTIONS[name].test(w))) {
+      return { kind: "changes", name, reason: `uses a ${name} option that writes files` };
+    }
     if (name.includes("/") || /^\w+=/.test(name) || ["sudo", "env", "command", "time", "nohup"].includes(name)) {
       return { kind: "changes", name, reason: "uses a wrapper or executable form this prototype does not simulate" };
     }
@@ -156,11 +249,12 @@
 
     for (const part of parsed) {
       const cls = classify(part.cmd);
-      if (part.connector === "&&" && priorSucceeded === false) {
-        steps.push({ ...part, cls, skipped: true, skipReason: "the previous command failed" });
+      const conditional = part.connector === "&&" || part.connector === "||";
+      if ((part.connector === "&&" && priorSucceeded === false) || (part.connector === "||" && priorSucceeded === true)) {
+        steps.push({ ...part, cls, skipped: true, skipReason: part.connector === "&&" ? "the previous command failed" : "the previous command succeeded" });
         continue;
       }
-      if (part.connector === "&&" && priorSucceeded == null) {
+      if (conditional && priorSucceeded == null) {
         blocked = true;
         steps.push({ ...part, cls, skipped: true, skipReason: "the previous read-only command's exit status cannot be determined" });
         continue;
@@ -171,7 +265,9 @@
         continue;
       }
       if (cls.kind === "readonly") {
-        priorSucceeded = cls.alwaysSucceeds ? true : null;
+        priorSucceeded = cls.alwaysSucceeds ? true : cls.pipeline ? null : readonlyStatus(stripNullRedirects(part.cmd), files);
+        // A read-only step that fails in the mock means the plan would not run as written.
+        if (priorSucceeded === false) blocked = true;
         steps.push({ ...part, cls, success: priorSucceeded });
         continue;
       }
@@ -183,7 +279,30 @@
         continue;
       }
 
-      const r = Engine.simulate(files, part.cmd);
+      const cmd = stripNullRedirects(part.cmd);
+      let r;
+      if (cls.kind === "compound") {
+        let groups = null, reason = "", extraErrors = [];
+        if (cls.name === "for") {
+          const u = Engine.unrollFor(files, cmd);
+          if (u.error) reason = u.error; else groups = u.iterations;
+        } else {
+          const f = Engine.runFind(files, cmd);
+          if (f.error) reason = f.error;
+          else { groups = [f.commands.map((c) => ({ cmd: c, connector: ";" }))]; extraErrors = f.errors; }
+        }
+        if (!groups) {
+          blocked = true;
+          stateUnknown = true;
+          priorSucceeded = null;
+          steps.push({ ...part, cls: { kind: "changes", name: cls.name, reason: reason.replace(/^(find|for loop): /, "") }, success: null });
+          continue;
+        }
+        r = Engine.simulateMany(files, groups);
+        r.errors.push(...extraErrors);
+      } else {
+        r = Engine.simulate(files, cmd);
+      }
       const failed = !!r.blocked || r.errors.length > 0;
       blocked ||= failed;
       priorSucceeded = !failed;
@@ -267,6 +386,10 @@
     const args = words.slice(1).filter((w) => !w.startsWith("-"));
     if (name === "rm") return `Removes ${args.join(" ") || "the files"}.`;
     if (name === "mkdir") return `Creates the folder ${args.join(" ")}.`;
+    if (name === "rmdir") return `Removes the empty folder ${args.join(" ")}.`;
+    if (name === "tar") return "Creates an archive of the files.";
+    if (name === "find") return "Finds matching files and acts on each one.";
+    if (name === "for") return "Repeats a command for each matching file.";
     if (name === "cp" && args.length > 1) return `Copies ${args.slice(0, -1).join(" ")} to ${args[args.length - 1]}.`;
     if (name === "mv" && args.length > 1) return `Moves ${args.slice(0, -1).join(" ")} to ${args[args.length - 1]}.`;
     return `Runs ${name || "the command"}.`;
@@ -338,6 +461,8 @@
   }
 
   // ---------- the page ----------
+
+  if (window.TODAY) Engine.setToday(window.TODAY);
 
   window.Playground = function (app) {
     const { h, baselineView, structuredView, fmtSize, fmtDate } = window.UI;
@@ -696,5 +821,7 @@
     simulateSequence,
     splitCommands,
     treeToFiles,
+    readonlyStatus,
+    stripNullRedirects,
   };
 })();
