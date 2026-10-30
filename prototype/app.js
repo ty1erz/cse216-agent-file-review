@@ -78,6 +78,7 @@
     if (sum.deleted) chips.push(chip("del", `Deletes ${sum.deleted} file${sum.deleted > 1 ? "s" : ""}` + (sum.bytesLost ? ` · ${fmtSize(sum.bytesLost)}` : "")));
     if (sum.moved) chips.push(chip("mov", `Moves ${sum.moved} file${sum.moved > 1 ? "s" : ""}`));
     if (sum.created) chips.push(chip("new", `Creates ${sum.created} file${sum.created > 1 ? "s" : ""}`));
+    if (sum.folders) chips.push(chip("new", `Creates ${sum.folders} folder${sum.folders > 1 ? "s" : ""}`));
     if (sum.overwritten) chips.push(chip("ovr", `Overwrites ${sum.overwritten} existing file${sum.overwritten > 1 ? "s" : ""}`));
     chips.push(sum.irreversible ? chip("warn", "Cannot be undone") : chip("ok", "Nothing is lost"));
     if (!sc.scope.length) chips.push(chip("neutral", "No folder named in the request"));

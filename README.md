@@ -24,12 +24,14 @@ python3 -m http.server 8216 --directory prototype
 
 Then open http://localhost:8216. Three modes:
 
-- `#try`: the interactive prototype. Type a request and any `rm`, `cp` or
-  `mv` command (with `-r`, `-f`, wildcards `* ? [ ]`, quoted names, and
-  chains with `&&` or `;`). The plain prompt and the file preview are computed
-  from what you type, against a mock file system. The folders your request is
-  about are inferred from its text, and you can edit them. Approve applies
-  the change to the mock files, and Undo reverts it.
+- `#try`: the interactive prototype. Type a request in plain English. A model
+  sees the mock file tree and proposes the shell commands an agent would run.
+  The page sorts them into previewable file changes (`rm`, `cp`, `mv`, `mkdir`,
+  with `-r`/`-f`/`-p`, wildcards and quoted names), file changes it can't
+  preview (e.g. `chmod`, `sed -i`, `find -delete`, `> file`, `git clean`;
+  these block Approve), and read-only commands. Approve applies the change to
+  the mock files, and Undo reverts it. You can edit the agent's commands, or
+  type your own when the model isn't connected.
 - `#demo`: every survey scenario, with an answer key.
 - `#survey`: the study.
 
@@ -69,6 +71,23 @@ time, confidence), ready for a pivot table.
 
 Before surveying people outside the team, check with the professor whether
 this needs IRB review.
+
+### Connecting the model (`agent-proxy/`)
+
+The page can't hold an API key, so model calls go through a small Apps Script
+web app in `agent-proxy/`. Its URL is `agentUrl` in `prototype/config.js`. To
+set it up, open the script and go to Project Settings → Script properties:
+
+| Property | Value |
+|---|---|
+| `LLM_API_KEY` | A Claude API key, or a UCSD TritonAI key |
+| `LLM_PROVIDER` | `anthropic` (default) or `openai` for TritonAI |
+| `LLM_MODEL` | default `claude-opus-5-5`; for TritonAI e.g. `api-glm-5.3` |
+| `LLM_BASE_URL` | TritonAI only: `https://tritonai-api.ucsd.edu/v1` |
+| `DAILY_LIMIT` | optional, model calls per day (default 300) |
+
+Then pick `authorize` in the editor's function menu, click Run once, and
+approve. The key never leaves Script Properties.
 
 ### Publish online
 

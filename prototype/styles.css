@@ -310,3 +310,24 @@ textarea {
 .change-box { display: grid; gap: 8px; justify-items: end; }
 .change-box[hidden] { display: none; }
 .chip-neutral { background: var(--surface-2); color: var(--muted); }
+.ask-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
+@media (max-width: 520px) { .ask-row { grid-template-columns: 1fr; } }
+.ask-row .primary { white-space: nowrap; }
+.example { font-family: inherit; }
+.agent-area:empty { display: none; }
+.agent-msg { margin-top: 10px; padding: 12px 14px; border-radius: var(--radius); background: var(--surface-2); }
+.agent-msg p { margin: 4px 0 8px; }
+.agent-msg.loading { color: var(--muted); }
+.agent-msg.error { background: var(--warn-bg); color: var(--warn); }
+.agent-cmds { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.agent-cmds code { font-size: 0.85rem; word-break: break-all; margin-right: 6px; }
+.badge { font-size: 0.72rem; font-weight: 600; padding: 1px 7px; border-radius: 999px; }
+.badge-change { background: var(--ovr-bg); color: var(--ovr); }
+.badge-warn { background: var(--warn-bg); color: var(--warn); }
+.badge-read { background: var(--ok-bg); color: var(--ok); }
+.advanced { margin-top: 10px; }
+.advanced > summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
+.advanced[open] { display: grid; gap: 6px; }
+.step-note { padding: 10px 12px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); }
+.step-note.warn { background: var(--warn-bg); border-color: transparent; color: var(--warn); }
+.step-note code { font-weight: 600; }

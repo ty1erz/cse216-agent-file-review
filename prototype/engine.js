@@ -188,8 +188,15 @@
           } else errors.push(`${name}: ${src}: no such file`);
         }
       }
+    } else if (name === "mkdir") {
+      for (const a of args) {
+        const p = normalize(a);
+        if (tree.isDir(p)) { if (!flags.has("p")) errors.push(`mkdir: ${p}: already exists`); }
+        else if (!flags.has("p") && !tree.isDir(parentOf(p))) errors.push(`mkdir: ${parentOf(p)}: no such folder (use -p)`);
+        else effects.push({ type: "mkdir", path: p });
+      }
     } else {
-      errors.push(`This prototype only previews rm, cp and mv (got "${name}")`);
+      errors.push(`This prototype only previews rm, cp, mv and mkdir (got "${name}")`);
     }
 
     // Final tree, so the UI can show before and after side by side.
@@ -201,7 +208,8 @@
       if (e.type === "move") afterTree.files.delete(e.from);
     }
     for (const e of effects) {
-      if (e.type !== "delete") afterTree.addFile(e.path, e.after);
+      if (e.type === "mkdir") afterTree.addDir(e.path);
+      else if (e.type !== "delete") afterTree.addFile(e.path, e.after);
     }
     // a moved or deleted folder disappears unless something new lives in it
     for (const d of removedDirs) {
@@ -218,6 +226,7 @@
     return {
       deleted: count("delete"),
       created: count("create"),
+      folders: count("mkdir"),
       overwritten: count("overwrite") + result.effects.filter((e) => e.type === "move" && e.before).length,
       moved: count("move"),
       bytesLost: bytes,
