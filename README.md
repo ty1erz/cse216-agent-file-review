@@ -4,13 +4,17 @@ CSE 216 project, Fall 2026: Xiaokang Ye, Jixuan Chen, Yirui Miao, Tianyue Zhang,
 
 When an AI agent wants to delete, copy or move files, a plain "Approve?" prompt
 rarely shows *which* files change. We compare that prompt with a structured
-preview of every affected file.
+preview of every affected file. Both screens are embedded in recognizable
+OpenHands, Cline and Codex CLI interaction shells so the prototype can also be
+evaluated in the context of current coding-agent interfaces.
 
 ## What's here
 
 | Path | What it is |
 |---|---|
-| `prototype/` | Web prototype: a demo of both screens and the survey. No build step. |
+| `prototype/` | Web prototype: both confirmation screens in three agent harnesses, plus the survey. No build step. |
+| `docs/experiment-design.md` | Integrated study design, assignment and analysis plan. |
+| `docs/third-party-notices.md` | Upstream interface references, revisions and licenses. |
 | `research/command_selection.md` | Why we chose `rm`, `cp` and `mv`, with data |
 | `research/scripts/analyze_nl2bash.py` | Counts commands in the NL2Bash dataset |
 | `research/scripts/count_agent_commands.py` | Counts commands in your own Claude Code and Codex logs |
@@ -26,13 +30,13 @@ Then open http://localhost:8216. Three modes:
 
 - `#try`: the interactive prototype. Type a request in plain English. A model
   sees the mock file tree and proposes the shell commands an agent would run.
-  The page sorts them into previewable file changes (`rm`, `cp`, `mv`, `mkdir`,
-  with `-r`/`-f`/`-p`, wildcards and quoted names), file changes it can't
-  preview (e.g. `chmod`, `sed -i`, `find -delete`, `> file`, `git clean`;
-  these block Approve), and read-only commands. Approve applies the change to
+  The page distinguishes supported file changes (`rm`, `cp`, `mv`, `mkdir`),
+  an explicit set of read-only commands, and commands it cannot preview.
+  Unsupported commands or syntax block Approve. Approve applies the change to
   the mock files, and Undo reverts it. You can edit the agent's commands, or
   type your own when the model isn't connected.
-- `#demo`: every survey scenario, with an answer key.
+- `#demo`: every survey scenario, with selectors for the confirmation screen
+  and agent harness, plus an answer key.
 - `#survey`: the study.
 
 The interactive mode lives in `prototype/playground.js`.
@@ -41,24 +45,41 @@ The interactive mode lives in `prototype/playground.js`.
 
 - Everyone sees the same 8 scenarios (3 rm, 2 cp, 3 mv), half on the plain
   prompt and half on the file preview.
+- Each participant is assigned one harness for the entire survey: OpenHands,
+  Cline or Codex CLI. Assignment is random by default, or can be fixed with the
+  links below when the team needs balanced group sizes.
 - Scenarios are split into sets X and Y, each with 2 commands that match the
   request and 2 that don't. A participant is randomly put in one of 4 groups
   (which set goes on which screen × which screen comes first), and scenarios
   are shuffled within each part.
 - Each part starts with an unscored practice round.
-- We record each decision (approve / reject / request change), whether it was
-  correct, response time, a 1–5 confidence rating and an optional comment.
+- We record each decision (approve / reject / request change), binary approval
+  accuracy, response time, a 1–5 confidence rating and an optional comment.
+  Accuracy means approving matching commands and declining mismatching ones;
+  reject and request change both count as declining. The action itself is
+  retained for separate analysis.
   After each part: 4 Likert items about that screen. At the end: which screen
   they prefer and why.
 - No names or emails are collected.
+
+For a small pilot, distribute the fixed links evenly instead of relying on
+random assignment:
+
+- `?harness=openhands#survey`
+- `?harness=cline#survey`
+- `?harness=codex#survey`
+
+For example, with five team reviewers use two OpenHands links, two Cline links
+and one Codex link. Treat harness comparisons as exploratory at that sample
+size; the main study comparison remains plain prompt versus file preview.
 
 Scenarios live in `prototype/scenarios.js`; the preview logic is in
 `prototype/engine.js`.
 
 ### Collecting responses
 
-By default, participants download a JSON file at the end. To collect into a
-Google Sheet instead:
+The checked-in configuration submits to the team's Google Sheet collector.
+Participants can also download a JSON file. To configure another collector:
 
 1. Create a Sheet, then open Extensions → Apps Script and replace the code with
    [`survey/collect_responses.gs`](survey/collect_responses.gs).
@@ -67,7 +88,15 @@ Google Sheet instead:
 
 Each response adds a row to the `responses` tab (background, ratings,
 preference) and one row per scenario to the `trials` tab (decision, correct,
-time, confidence), ready for a pivot table.
+time, confidence), ready for a pivot table. Both tabs include the assigned
+`harness`. Replace the deployed Apps Script with the current file and create a
+new deployment version to enable schema validation, safe text cells, duplicate
+protection and storage receipts. After posting, the page reads
+`?receipt=<response-id>` and reports success only if the collector confirms
+the response and all eight trials. With an older deployment, submission stays
+unconfirmed; the participant is asked to download the response. Completed
+responses are backed up in this browser until receipt confirmation, and can
+be downloaded from the home page after a reload.
 
 Before surveying people outside the team, check with the professor whether
 this needs IRB review.
@@ -87,7 +116,18 @@ set it up, open the script and go to Project Settings → Script properties:
 | `DAILY_LIMIT` | optional, model calls per day (default 300) |
 
 Then pick `authorize` in the editor's function menu, click Run once, and
-approve. The key never leaves Script Properties.
+approve. Deploy the web app with access for the intended participants and set
+`agentUrl` to that deployment's `/exec` URL. Opening it should return
+`{"ok":true,"configured":true}`. The key never appears in the front end.
+
+## Verify changes
+
+Run `npm test` with Node.js 20 or later; no packages need installing. Tests
+cover the command preview engine, command classification, async request state,
+survey collector and storage confirmation. CI runs them on every push and PR.
+For a manual check, open `#try`, `#demo`, and each fixed harness survey link.
+The interactive prototype is a separate demonstration; only `#survey` records
+study decisions. The study uses its displayed reference date for every file.
 
 ### Publish online
 

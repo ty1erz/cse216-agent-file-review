@@ -29,45 +29,200 @@
 
   // ---------- understanding commands ----------
 
-  // Split "a && b; c" (or one command per line) into commands, ignoring separators inside quotes.
-  function splitCommands(line) {
+  // Parse a simple sequence while preserving whether each step follows `&&`
+  // (run only after success) or `;` / a newline (run regardless). More complex
+  // shell syntax remains inside a step and is conservatively blocked below.
+  function parseCommandSequence(line) {
     const parts = [];
-    let cur = "", quote = null;
+    let cur = "", quote = null, escaped = false, nextConnector = null, parseError = "";
+    const pushCommand = () => {
+      if (!cur.trim()) return false;
+      parts.push({ cmd: cur.trim(), connector: nextConnector });
+      cur = "";
+      nextConnector = null;
+      return true;
+    };
+
     for (let i = 0; i < line.length; i++) {
       const c = line[i];
+      if (escaped) { cur += c; escaped = false; continue; }
+      if (c === "\\") { cur += c; escaped = true; continue; }
       if (quote) { if (c === quote) quote = null; cur += c; continue; }
       if (c === '"' || c === "'") { quote = c; cur += c; continue; }
-      if (c === ";" || c === "\n" || (c === "&" && line[i + 1] === "&")) {
-        if (c === "&") i++;
-        if (cur.trim()) parts.push(cur.trim());
-        cur = "";
+      if (c === "&" && line[i + 1] === "&") {
+        if (!pushCommand()) parseError ||= "The command has && without a command before it.";
+        else nextConnector = "&&";
+        i++;
+        continue;
+      }
+      if (c === ";") {
+        if (!pushCommand()) parseError ||= "The command has an empty step between semicolons.";
+        else nextConnector = ";";
+        continue;
+      }
+      if (c === "\n") {
+        if (pushCommand()) nextConnector = ";";
         continue;
       }
       cur += c;
     }
-    if (cur.trim()) parts.push(cur.trim());
+    const endedWithCommand = pushCommand();
+    if (!endedWithCommand && nextConnector === "&&") parseError ||= "The command ends with && and has no following command.";
+    if (quote || escaped) parseError ||= "The command contains an unfinished quote or escape.";
+    if (parseError) parts.parseError = parseError;
     return parts;
   }
 
-  const PREVIEWABLE = new Set(["rm", "cp", "mv", "mkdir"]);
-  const CHANGES_FILES = new Set(["rmdir", "unlink", "shred", "rename", "ln", "touch", "chmod", "chown", "chgrp",
-    "rsync", "tar", "zip", "unzip", "gzip", "gunzip", "bzip2", "dd", "truncate", "install", "tee", "patch"]);
+  function splitCommands(line) {
+    return parseCommandSequence(line).map((part) => part.cmd);
+  }
 
-  // previewable: we can simulate it. changes: modifies files in a way we can't preview. readonly: no file changes.
+  const PREVIEWABLE = new Set(["rm", "cp", "mv", "mkdir"]);
+  const READ_ONLY = new Set(["ls", "pwd", "cat", "head", "tail", "stat", "file", "du", "wc", "grep", "rg", "echo", "printf", "true"]);
+  const SAFE_GIT = new Set(["status", "diff", "log", "show", "rev-parse", "ls-files"]);
+
+  // Replace quoted text with spaces so shell operators inside a filename or a
+  // message do not affect classification. Return whether the quoting itself is
+  // complete; incomplete input is never safe to preview or auto-run.
+  function maskQuoted(command) {
+    let out = "", quote = null, escaped = false, hasEscape = false;
+    for (const c of command) {
+      if (escaped) { out += " "; escaped = false; continue; }
+      if (c === "\\" && quote !== "'") { out += " "; escaped = true; hasEscape = true; continue; }
+      if (quote) {
+        if (c === quote) quote = null;
+        // Command and variable substitution remain active inside double quotes.
+        out += quote === '"' && (c === "$" || c === "`") ? c : " ";
+        continue;
+      }
+      if (c === '"' || c === "'") { quote = c; out += " "; continue; }
+      out += c;
+    }
+    return { text: out, complete: !quote && !escaped, hasEscape };
+  }
+
+  function commandWords(command) {
+    const words = [];
+    let cur = "", quote = null, escaped = false;
+    for (const c of command.trim()) {
+      if (escaped) { cur += c; escaped = false; continue; }
+      if (c === "\\" && quote !== "'") { escaped = true; continue; }
+      if (quote) { if (c === quote) quote = null; else cur += c; continue; }
+      if (c === '"' || c === "'") { quote = c; continue; }
+      if (/\s/.test(c)) { if (cur) { words.push(cur); cur = ""; } }
+      else cur += c;
+    }
+    if (cur) words.push(cur);
+    return words;
+  }
+
+  // previewable: we can simulate it. changes: it is not proven read-only and
+  // must be blocked. readonly: an explicitly supported read-only command.
   function classify(command) {
-    const unquoted = command.replace(/"[^"]*"|'[^']*'/g, '""');
-    const words = unquoted.trim().split(/\s+/).filter((w) => !/^\w+=/.test(w));
-    while (["sudo", "env", "command", "time", "nohup"].includes(words[0])) words.shift();
-    const name = (words[0] || "").replace(/^.*\//, "");
-    const pipesOrSubshells = /[|`]|\$\(/.test(unquoted);
-    const hiddenChange = /(^|[^>])>{1,2}(?!&)/.test(unquoted) // output redirection
-      || /\bsed\b[^|]*\s-i/.test(unquoted)
-      || /\s-delete\b|-exec(dir)?\s+(rm|mv|cp)\b/.test(unquoted)
-      || /\bxargs\b[^|]*\b(rm|mv|cp)\b/.test(unquoted)
-      || /\bgit\s+(rm|mv|clean|reset|checkout|restore|stash)\b/.test(unquoted);
-    if (PREVIEWABLE.has(name) && !pipesOrSubshells && !hiddenChange) return { kind: "previewable", name };
-    if (PREVIEWABLE.has(name) || CHANGES_FILES.has(name) || hiddenChange) return { kind: "changes", name };
-    return { kind: "readonly", name };
+    const masked = maskQuoted(command);
+    const words = commandWords(command);
+    const name = words[0] || "";
+    const unsupportedShell = /&&|;|\n|\|\||[|`<>$~{}#]|(^|[^&])&(?!&)/.test(masked.text);
+    if (!masked.complete) return { kind: "changes", name, reason: "has unfinished quoting" };
+    if (!name) return { kind: "changes", name, reason: "is empty" };
+    if (masked.hasEscape) return { kind: "changes", name, reason: "uses backslash escaping this prototype does not simulate" };
+    if (unsupportedShell) return { kind: "changes", name, reason: "uses shell syntax this prototype cannot safely preview" };
+    if (name.includes("/") || /^\w+=/.test(name) || ["sudo", "env", "command", "time", "nohup"].includes(name)) {
+      return { kind: "changes", name, reason: "uses a wrapper or executable form this prototype does not simulate" };
+    }
+    if (PREVIEWABLE.has(name)) return { kind: "previewable", name };
+    if (READ_ONLY.has(name)) {
+      if (name === "rg" && words.some((word) => word === "--pre" || word.startsWith("--pre="))) {
+        return { kind: "changes", name, reason: "can run an external command through rg --pre" };
+      }
+      const alwaysSucceeds = name === "true" || (name === "pwd" && words.slice(1).every((word) => word === "-L" || word === "-P"));
+      return { kind: "readonly", name, alwaysSucceeds };
+    }
+    const unsafeGitOption = words.some((word) =>
+      word === "-o" || word === "--output" || word.startsWith("--output=") || word === "--ext-diff" || word === "--textconv");
+    if (name === "git" && SAFE_GIT.has(words[1] || "") && !unsafeGitOption) {
+      return { kind: "readonly", name, alwaysSucceeds: false };
+    }
+    return { kind: "changes", name, reason: "is not on the supported read-only list" };
+  }
+
+  function simulateSequence(command, initialFiles) {
+    const parsed = parseCommandSequence(command);
+    let files = initialFiles;
+    let priorSucceeded = true;
+    let stateUnknown = false;
+    let blocked = !!parsed.parseError;
+    const steps = [];
+
+    for (const part of parsed) {
+      const cls = classify(part.cmd);
+      if (part.connector === "&&" && priorSucceeded === false) {
+        steps.push({ ...part, cls, skipped: true, skipReason: "the previous command failed" });
+        continue;
+      }
+      if (part.connector === "&&" && priorSucceeded == null) {
+        blocked = true;
+        steps.push({ ...part, cls, skipped: true, skipReason: "the previous read-only command's exit status cannot be determined" });
+        continue;
+      }
+      if (stateUnknown) {
+        blocked = true;
+        steps.push({ ...part, cls, skipped: true, skipReason: "an earlier unsupported command may have changed the files" });
+        continue;
+      }
+      if (cls.kind === "readonly") {
+        priorSucceeded = cls.alwaysSucceeds ? true : null;
+        steps.push({ ...part, cls, success: priorSucceeded });
+        continue;
+      }
+      if (cls.kind === "changes") {
+        blocked = true;
+        stateUnknown = true;
+        priorSucceeded = null;
+        steps.push({ ...part, cls, success: null });
+        continue;
+      }
+
+      const r = Engine.simulate(files, part.cmd);
+      const failed = !!r.blocked || r.errors.length > 0;
+      blocked ||= failed;
+      priorSucceeded = !failed;
+      // A normal shell command can make partial changes before returning a
+      // non-zero status. Keep those changes in the preview, but block Approve.
+      if (!r.blocked) files = treeToFiles(r.after);
+      steps.push({ ...part, cls, r, success: !failed });
+    }
+
+    return {
+      steps,
+      finalFiles: files,
+      blocked,
+      parseError: parsed.parseError || "",
+      expression: parsed.map((part, i) => `${i ? ` ${part.connector || ";"} ` : ""}${part.cmd}`).join(""),
+    };
+  }
+
+  function createRequestCoordinator() {
+    let generation = 0;
+    let controller = null;
+    return {
+      start() {
+        if (controller) controller.abort();
+        controller = new AbortController();
+        return { generation: ++generation, signal: controller.signal };
+      },
+      invalidate() {
+        generation++;
+        if (controller) controller.abort();
+        controller = null;
+      },
+      isCurrent(ticket) {
+        return !!ticket && ticket.generation === generation && !ticket.signal.aborted;
+      },
+      finish(ticket) {
+        if (this.isCurrent(ticket)) controller = null;
+      },
+    };
   }
 
   function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
@@ -131,23 +286,55 @@
     empty_request: "Type a request first.",
     model_error: "The model call failed.",
     network: "Couldn't reach the model proxy. It may not be set up yet. You can still type commands yourself below.",
+    timeout: "The model proxy did not respond within 20 seconds. Try again, or type the commands yourself below.",
     not_authorized: "The model proxy hasn't been authorized by its owner yet. You can still type commands yourself below.",
   };
 
-  async function askAgent(request, files) {
+  async function askAgent(request, files, options = {}) {
     const url = window.SURVEY_CONFIG.agentUrl;
     if (!url) return { error: "not_configured" };
+    const controller = new AbortController();
+    const timeoutMs = options.timeoutMs == null ? 20000 : options.timeoutMs;
+    let timedOut = false;
+    const relayAbort = () => controller.abort();
+    if (options.signal) {
+      if (options.signal.aborted) return { error: "cancelled" };
+      options.signal.addEventListener("abort", relayAbort, { once: true });
+    }
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
     try {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "text/plain" },
         body: JSON.stringify({ request, files, today: window.TODAY }),
+        signal: controller.signal,
       });
+      if (!res.ok) return { error: "network", detail: `The proxy returned HTTP ${res.status}.` };
       const text = await res.text();
       try { return JSON.parse(text); } catch (e) { return { error: "not_authorized" }; }
     } catch (e) {
+      if (options.signal && options.signal.aborted) return { error: "cancelled" };
+      if (timedOut) return { error: "timeout" };
       return { error: "network" };
+    } finally {
+      clearTimeout(timeout);
+      if (options.signal) options.signal.removeEventListener("abort", relayAbort);
     }
+  }
+
+  function normalizePlan(plan) {
+    if (!plan || typeof plan !== "object") return { error: "model_error", detail: "The model proxy returned an invalid plan." };
+    if (plan.error) return { error: String(plan.error), detail: plan.detail == null ? "" : String(plan.detail) };
+    if (!Array.isArray(plan.commands)
+      || plan.commands.some((command) => !command || typeof command !== "object" || typeof command.command !== "string")) {
+      return { error: "model_error", detail: "The model proxy returned an invalid plan." };
+    }
+    return {
+      commands: plan.commands.map((command) => ({ command: command.command.trim(), purpose: String(command.purpose || "") })).filter((command) => command.command),
+      model: plan.model == null ? "" : String(plan.model),
+      refused: !!plan.refused,
+      reply: plan.reply == null ? "" : String(plan.reply),
+    };
   }
 
   // ---------- the page ----------
@@ -169,6 +356,9 @@
       agent: { status: "idle" },  // idle | loading | done | error
       purposes: new Map(),        // command -> the agent's own description
     };
+    const requests = createRequestCoordinator();
+    let disposed = false;
+    let playRoot = null;
 
     const filesPanel = h("div", { class: "play-files" });
     const agentArea = h("div", { class: "agent-area", "aria-live": "polite" });
@@ -182,10 +372,27 @@
     let timer = null;
     const later = () => { clearTimeout(timer); timer = setTimeout(renderOutput, 200); };
 
-    requestBox.addEventListener("input", () => { state.request = requestBox.value; if (!state.scopeEdited) syncScope(); });
+    requestBox.addEventListener("input", () => {
+      const changed = requestBox.value !== state.request;
+      state.request = requestBox.value;
+      if (changed) {
+        requests.invalidate();
+        state.agent = { status: "idle" };
+        if (state.command) setCommands([]);
+        renderAgent();
+      }
+      if (!state.scopeEdited) syncScope();
+    });
     requestBox.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } });
     scopeBox.addEventListener("input", () => { state.scope = scopeBox.value; state.scopeEdited = !!scopeBox.value.trim(); scopeHint.textContent = state.scopeEdited ? "set by you" : ""; later(); });
-    const onCommand = () => { if (commandBox.value !== state.command) { state.command = commandBox.value; later(); } };
+    const onCommand = () => {
+      if (commandBox.value === state.command) return;
+      requests.invalidate();
+      state.agent = { status: "idle" };
+      renderAgent();
+      state.command = commandBox.value;
+      later();
+    };
     commandBox.addEventListener("input", onCommand);
     commandBox.addEventListener("keyup", onCommand); // some input methods skip "input"
 
@@ -206,39 +413,42 @@
     }
 
     async function ask(text) {
-      if (text != null) { state.request = requestBox.value = text; state.scopeEdited = false; syncScope(); }
+      if (text != null) {
+        requests.invalidate();
+        state.request = requestBox.value = text;
+        state.scopeEdited = false;
+        syncScope();
+      }
       const request = state.request.trim();
-      if (!request || state.agent.status === "loading") return;
+      if (!request || disposed) return;
+      const ticket = requests.start();
       state.agent = { status: "loading", request };
       setCommands([]);
       renderAgent();
-      const plan = await askAgent(request, state.files);
-      if (plan.error) {
-        state.agent = { status: "error", error: plan.error, detail: plan.detail, request };
+      const files = state.files.map((file) => ({ ...file }));
+      const plan = await askAgent(request, files, { signal: ticket.signal });
+      if (!requests.isCurrent(ticket) || disposed || !playRoot || !playRoot.isConnected) return;
+      requests.finish(ticket);
+      const normalized = normalizePlan(plan);
+      if (normalized.error) {
+        state.agent = { status: "error", error: normalized.error, detail: normalized.detail, request };
       } else {
-        const commands = (plan.commands || []).map((c) => ({ command: String(c.command).trim(), purpose: String(c.purpose || "") })).filter((c) => c.command);
+        const commands = normalized.commands;
         for (const c of commands) state.purposes.set(c.command, c.purpose);
-        state.agent = { status: "done", reply: plan.reply || "", commands, model: plan.model, refused: plan.refused, request };
+        state.agent = { status: "done", reply: normalized.reply, commands, model: normalized.model, refused: normalized.refused, request };
         setCommands(commands.map((c) => c.command));
       }
       renderAgent();
     }
 
-    // Run every step in order, each on the result of the previous one.
+    // Run every supported step in shell order, honoring `&&` failure stops.
     function simulateAll() {
-      let files = state.files;
-      const steps = splitCommands(state.command).map((cmd) => {
-        const cls = classify(cmd);
-        if (cls.kind !== "previewable") return { cmd, cls };
-        const r = Engine.simulate(files, cmd);
-        files = treeToFiles(r.after);
-        return { cmd, cls, r };
-      });
-      return { steps, finalFiles: files };
+      return simulateSequence(state.command, state.files);
     }
 
     function decide(kind, sim, note) {
-      const cmd = splitCommands(state.command).join(" && ");
+      if (kind === "approve" && sim.blocked) return;
+      const cmd = sim.expression || state.command.trim();
       if (kind === "approve") {
         state.history.push({ files: state.files, label: cmd });
         state.changed = new Set(sim.steps.flatMap(({ r }) => (r ? r.effects.map((e) => e.path) : [])));
@@ -261,14 +471,19 @@
     function undo() {
       const last = state.history.pop();
       if (!last) return;
+      requests.invalidate();
+      state.agent = { status: "idle" };
+      setCommands([]);
       state.files = last.files;
       state.changed = new Set();
       state.log.unshift({ kind: "undo", text: `Undid ${last.label}` });
       renderFiles();
+      renderAgent();
       renderOutput();
     }
 
     function switchSpace(id) {
+      requests.invalidate();
       state.space = spaces.find((s) => s.id === id);
       state.files = state.space.files.slice();
       state.history = [];
@@ -281,6 +496,12 @@
       renderFiles();
       renderAgent();
       setCommands([]);
+    }
+
+    function dispose() {
+      disposed = true;
+      requests.invalidate();
+      clearTimeout(timer);
     }
 
     // ---------- left: the mock file manager ----------
@@ -312,9 +533,9 @@
         h("div", { class: "fm-actions" },
           h("button", { onclick: undo, disabled: !state.history.length }, "Undo last approve"),
           h("button", { onclick: () => switchSpace(state.space.id) }, "Reset files")),
-        state.log.length ? h("div", { class: "play-log" },
+        ...state.log.length ? [h("div", { class: "play-log" },
           h("div", { class: "panel-title" }, "Activity"),
-          h("ul", {}, state.log.slice(0, 8).map((l) => h("li", { class: "log-" + l.kind }, l.text)))) : null);
+          h("ul", {}, state.log.slice(0, 8).map((l) => h("li", { class: "log-" + l.kind }, l.text))))] : []);
     }
 
     // ---------- the agent's answer ----------
@@ -340,10 +561,12 @@
         return;
       }
       const rows = a.commands.map((c) => {
-        const [label, cls, note] = KIND_LABEL[classify(c.command).kind];
+        const classification = classify(c.command);
+        const [label, cls, note] = KIND_LABEL[classification.kind];
         return h("li", {},
           h("code", {}, c.command),
-          h("span", { class: "badge " + cls }, label), h("span", { class: "fine" }, " " + note),
+          h("span", { class: "badge " + cls }, label),
+          h("span", { class: "fine" }, " " + (classification.reason ? `${note}: ${classification.reason}` : note)),
           c.purpose ? h("div", { class: "fine" }, c.purpose) : null);
       });
       agentArea.replaceChildren(h("div", { class: "agent-msg" },
@@ -376,6 +599,11 @@
       const views = [];
       sim.steps.forEach((s, i) => {
         const title = sim.steps.length > 1 ? h("div", { class: "step-title" }, `Step ${i + 1} of ${sim.steps.length}`) : null;
+        if (s.skipped) {
+          views.push(h("div", { class: "step" }, title, h("div", { class: "step-note warn" },
+            h("code", {}, s.cmd), ` would not be run because ${s.skipReason}.`)));
+          return;
+        }
         if (s.cls.kind === "readonly") {
           views.push(h("div", { class: "step" }, title, h("div", { class: "step-note" }, h("code", {}, s.cmd), " reads files only; no review needed.")));
           return;
@@ -383,7 +611,12 @@
         if (s.cls.kind === "changes") {
           views.push(h("div", { class: "step" }, title, h("div", { class: "step-note warn" },
             h("code", {}, s.cmd),
-            ` changes files, but this prototype can only preview plain rm, cp, mv and mkdir. Ask the agent to rewrite it, or reject it.`)));
+            ` is blocked because it ${s.cls.reason || "cannot be proven read-only or faithfully previewed"}. Ask the agent to rewrite it, or reject it.`)));
+          return;
+        }
+        if (s.r && s.r.blocked) {
+          views.push(h("div", { class: "step" }, title, h("div", { class: "step-note warn" },
+            h("code", {}, s.cmd), " cannot be faithfully previewed. ", (s.r.errors || []).join(" "))));
           return;
         }
         const sc = { ...base, command: s.cmd, agentSays: state.purposes.get(s.cmd) || describe(s.cmd), files: null };
@@ -393,15 +626,21 @@
         views.push(h("div", { class: "step" }, title, body));
       });
 
-      const blocked = sim.steps.some((s) => s.cls.kind === "changes");
+      const blocked = sim.blocked;
       const note = h("textarea", { rows: 2, placeholder: "What should the agent do instead?", "aria-label": "Requested change" });
+      const sendChange = h("button", { class: "primary", disabled: true }, "Send to agent");
+      note.addEventListener("input", () => { sendChange.disabled = !note.value.trim(); });
+      sendChange.addEventListener("click", () => {
+        const requested = note.value.trim();
+        if (requested) decide("change", sim, requested);
+      });
       const changeBox = h("div", { class: "change-box", hidden: true }, note,
-        h("button", { class: "primary", onclick: () => decide("change", sim, note.value.trim()) }, "Send to agent"));
+        sendChange);
 
       output.replaceChildren(
         ...views,
         h("div", { class: "decide" },
-          h("button", { class: "decision decision-approve", disabled: blocked, title: blocked ? "Some commands can't be previewed, so they can't be applied" : null, onclick: () => decide("approve", sim) }, "Approve"),
+          h("button", { class: "decision decision-approve", disabled: blocked, title: blocked ? "Some commands cannot be faithfully previewed or would fail" : null, onclick: () => decide("approve", sim) }, "Approve"),
           h("button", { class: "decision decision-reject", onclick: () => decide("reject", sim) }, "Reject"),
           h("button", { class: "decision decision-change", onclick: () => { changeBox.hidden = false; note.focus(); } }, "Request change")),
         changeBox);
@@ -416,9 +655,7 @@
     }
     renderSeg();
 
-    app.replaceChildren(
-      h("header", { class: "bar" }, h("a", { href: "#" }, "← Home"), h("span", {}, "Prototype")),
-      h("main", { class: "play" },
+    playRoot = h("main", { class: "play" },
         filesPanel,
         h("div", { class: "play-main" },
           h("section", { class: "request play-input" },
@@ -434,14 +671,30 @@
               commandBox,
               h("label", { class: "eyebrow" }, "Folders your request is about ", scopeHint),
               scopeBox)),
-          h("div", { class: "toolbar" }, viewSeg, h("span", { class: "fine" }, "Today is " + window.TODAY)),
-          output)));
+          h("div", { class: "toolbar" }, viewSeg, h("span", { class: "fine" }, "Mock workspace date: " + window.TODAY)),
+          output));
+    app.replaceChildren(
+      h("header", { class: "bar" }, h("a", { href: "#" }, "← Home"), h("span", {}, "Prototype")),
+      playRoot);
 
     renderFiles();
     renderAgent();
     renderOutput();
+    return dispose;
   };
 
   // exposed for testing in the console
-  window.Playground.internals = { splitCommands, inferScope, describe, treeToFiles, classify };
+  window.Playground.internals = {
+    askAgent,
+    classify,
+    createRequestCoordinator,
+    describe,
+    inferScope,
+    maskQuoted,
+    normalizePlan,
+    parseCommandSequence,
+    simulateSequence,
+    splitCommands,
+    treeToFiles,
+  };
 })();
