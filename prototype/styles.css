@@ -433,3 +433,7 @@ textarea {
 .step-note { padding: 10px 12px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); }
 .step-note.warn { background: var(--warn-bg); border-color: transparent; color: var(--warn); }
 .step-note code { font-weight: 600; }
+.notes { margin: 0 0 10px; padding-left: 18px; color: #c8c8c2; font-size: 0.85rem; }
+.ran { margin: 0 0 10px; color: #c8c8c2; font-size: 0.85rem; }
+.ran summary { cursor: pointer; }
+.ran pre { margin: 6px 0 0; padding: 8px 10px; border-radius: 6px; background: rgba(255, 255, 255, 0.07); white-space: pre-wrap; word-break: break-all; font-size: 0.8rem; }

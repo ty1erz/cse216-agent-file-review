@@ -240,3 +240,23 @@ test("all committed study scenarios remain in the supported subset", () => {
     assert.equal(result.blocked, false, `${scenario.id}: ${result.errors.join("; ")}`);
   }
 });
+
+test("backslash-escaped spaces and ~/ paths resolve like Bash", () => {
+  const Engine = loadContext().window.Engine;
+  const files = [
+    { path: "Desktop/Screenshot 2026-10-21 at 09.14.png", size: 1 },
+    { path: "Desktop/Screenshot 2026-10-22 at 13.02.png", size: 2 },
+    { path: "Desktop/screenshots/" },
+  ];
+
+  // \  makes the space literal while the * stays an active wildcard
+  const escaped = Engine.simulate(files, "mv Desktop/Screenshot\\ 2026-10-21*.png Desktop/screenshots/");
+  assert.equal(escaped.blocked, false);
+  assert.deepEqual(effectPaths(escaped, "move"), ["Desktop/screenshots/Screenshot 2026-10-21 at 09.14.png"]);
+
+  const home = Engine.simulate(files, "rm ~/Desktop/Screenshot*.png");
+  assert.equal(home.blocked, false);
+  assert.equal(effectPaths(home, "delete").length, 2);
+
+  assert.equal(Engine.simulate(files, "rm ~other/file.txt").blocked, true);
+});
