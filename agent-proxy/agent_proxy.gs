@@ -6,7 +6,7 @@
 //   LLM_API_KEY   required. A Claude API key, or a TritonAI key.
 //   LLM_PROVIDER  "anthropic" (default) or "openai" for an OpenAI-compatible
 //                 gateway such as TritonAI.
-//   LLM_MODEL     default "claude-opus-5-5"; for TritonAI e.g. "api-glm-5.3".
+//   LLM_MODEL     default "claude-opus-5-5" for Claude, "api-glm-5.3-flash" for TritonAI.
 //   LLM_BASE_URL  OpenAI-compatible base URL, e.g. https://tritonai-api.ucsd.edu/v1
 //   DAILY_LIMIT   max model calls per day (default 300), to cap spending.
 
@@ -111,7 +111,7 @@ function askClaude(props, key, userText) {
 // OpenAI-compatible chat completions, e.g. the UCSD TritonAI gateway.
 function askOpenAICompatible(props, key, userText) {
   const base = (props.getProperty("LLM_BASE_URL") || "https://tritonai-api.ucsd.edu/v1").replace(/\/+$/, "");
-  const model = props.getProperty("LLM_MODEL") || "api-glm-5.3";
+  const model = props.getProperty("LLM_MODEL") || "api-glm-5.3-flash";
   const instructions = SYSTEM_PROMPT + ' Answer with only a JSON object of the form {"reply": string, "commands": [{"command": string, "purpose": string}]} and nothing else.';
   const res = UrlFetchApp.fetch(base + "/chat/completions", {
     method: "post",

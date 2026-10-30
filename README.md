@@ -82,7 +82,7 @@ set it up, open the script and go to Project Settings → Script properties:
 |---|---|
 | `LLM_API_KEY` | A Claude API key, or a UCSD TritonAI key |
 | `LLM_PROVIDER` | `anthropic` (default) or `openai` for TritonAI |
-| `LLM_MODEL` | default `claude-opus-5-5`; for TritonAI e.g. `api-glm-5.3` |
+| `LLM_MODEL` | default `claude-opus-5-5` (Claude) or `api-glm-5.3-flash` (TritonAI) |
 | `LLM_BASE_URL` | TritonAI only: `https://tritonai-api.ucsd.edu/v1` |
 | `DAILY_LIMIT` | optional, model calls per day (default 300) |
 
