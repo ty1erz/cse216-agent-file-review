@@ -4,13 +4,17 @@ CSE 216 project, Fall 2026: Xiaokang Ye, Jixuan Chen, Yirui Miao, Tianyue Zhang,
 
 When an AI agent wants to delete, copy or move files, a plain "Approve?" prompt
 rarely shows *which* files change. We compare that prompt with a structured
-preview of every affected file.
+preview of every affected file. Both screens are embedded in recognizable
+OpenHands, Cline and Codex CLI interaction shells so the prototype can also be
+evaluated in the context of current coding-agent interfaces.
 
 ## What's here
 
 | Path | What it is |
 |---|---|
-| `prototype/` | Web prototype: a demo of both screens and the survey. No build step. |
+| `prototype/` | Web prototype: both confirmation screens in three agent harnesses, plus the survey. No build step. |
+| `docs/experiment-design.md` | Integrated study design, assignment and analysis plan. |
+| `docs/third-party-notices.md` | Upstream interface references, revisions and licenses. |
 | `research/command_selection.md` | Why we chose `rm`, `cp` and `mv`, with data |
 | `research/scripts/analyze_nl2bash.py` | Counts commands in the NL2Bash dataset |
 | `research/scripts/count_agent_commands.py` | Counts commands in your own Claude Code and Codex logs |
@@ -32,7 +36,8 @@ Then open http://localhost:8216. Three modes:
   these block Approve), and read-only commands. Approve applies the change to
   the mock files, and Undo reverts it. You can edit the agent's commands, or
   type your own when the model isn't connected.
-- `#demo`: every survey scenario, with an answer key.
+- `#demo`: every survey scenario, with selectors for the confirmation screen
+  and agent harness, plus an answer key.
 - `#survey`: the study.
 
 The interactive mode lives in `prototype/playground.js`.
@@ -41,6 +46,9 @@ The interactive mode lives in `prototype/playground.js`.
 
 - Everyone sees the same 8 scenarios (3 rm, 2 cp, 3 mv), half on the plain
   prompt and half on the file preview.
+- Each participant is assigned one harness for the entire survey: OpenHands,
+  Cline or Codex CLI. Assignment is random by default, or can be fixed with the
+  links below when the team needs balanced group sizes.
 - Scenarios are split into sets X and Y, each with 2 commands that match the
   request and 2 that don't. A participant is randomly put in one of 4 groups
   (which set goes on which screen × which screen comes first), and scenarios
@@ -51,6 +59,17 @@ The interactive mode lives in `prototype/playground.js`.
   After each part: 4 Likert items about that screen. At the end: which screen
   they prefer and why.
 - No names or emails are collected.
+
+For a small pilot, distribute the fixed links evenly instead of relying on
+random assignment:
+
+- `?harness=openhands#survey`
+- `?harness=cline#survey`
+- `?harness=codex#survey`
+
+For example, with five team reviewers use two OpenHands links, two Cline links
+and one Codex link. Treat harness comparisons as exploratory at that sample
+size; the main study comparison remains plain prompt versus file preview.
 
 Scenarios live in `prototype/scenarios.js`; the preview logic is in
 `prototype/engine.js`.
@@ -67,7 +86,10 @@ Google Sheet instead:
 
 Each response adds a row to the `responses` tab (background, ratings,
 preference) and one row per scenario to the `trials` tab (decision, correct,
-time, confidence), ready for a pivot table.
+time, confidence), ready for a pivot table. Both tabs include the assigned
+`harness`. If the Apps Script was already deployed, replace it with the current
+file and create a new deployment version. Until then, the harness still appears
+inside the `raw_json` response field, but not as a separate column.
 
 Before surveying people outside the team, check with the professor whether
 this needs IRB review.

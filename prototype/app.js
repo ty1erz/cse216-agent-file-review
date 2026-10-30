@@ -7,6 +7,11 @@
   "use strict";
 
   const app = document.getElementById("app");
+  const HARNESSES = [
+    { id: "openhands", name: "OpenHands", detail: "Agent Canvas conversation + workspace" },
+    { id: "cline", name: "Cline", detail: "VS Code side-panel agent + editor" },
+    { id: "codex", name: "Codex CLI", detail: "Terminal transcript + approval overlay" },
+  ];
 
   // ---------- small helpers ----------
 
@@ -50,6 +55,10 @@
 
   function scopeLabel(scope) {
     return scope.map((s) => s + "/").join(" or ");
+  }
+
+  function harnessName(id) {
+    return (HARNESSES.find((item) => item.id === id) || HARNESSES[0]).name;
   }
 
   // ---------- review screens ----------
@@ -214,17 +223,71 @@
     return condition === "structured" ? structuredView(sc) : baselineView(sc);
   }
 
+  function workspacePreview(sc) {
+    return h("div", { class: "workspace-preview", "aria-hidden": "true" },
+      h("div", { class: "workspace-tabs" }, h("span", {}, "Files"), h("span", { class: "active" }, "Changes"), h("span", {}, "Terminal")),
+      h("div", { class: "workspace-file" },
+        h("div", { class: "workspace-path" }, "sample-repo  ›  ", sc.scope[0] || "workspace"),
+        h("div", { class: "workspace-diff" },
+          h("span", { class: "line dim" }, "  # proposed file operation"),
+          h("span", { class: "line minus" }, "- before: current workspace"),
+          h("span", { class: "line plus" }, "+ after: command applied"),
+          h("span", { class: "line" }, "  command: " + sc.command))),
+      h("div", { class: "workspace-terminal" }, "$ review pending · no changes applied"));
+  }
+
+  // The task and confirmation content are identical in every harness. Only the
+  // surrounding, upstream-derived interaction shell changes.
+  function harnessView(sc, condition, harness) {
+    const review = reviewView(sc, condition);
+    const label = harnessName(harness);
+
+    if (harness === "codex") {
+      return h("section", { class: "harness harness-codex", "aria-label": `${label} interface` },
+        h("div", { class: "codex-title" }, h("strong", {}, ">_ Codex"), h("span", {}, "sample-repo"), h("span", { class: "waiting" }, "■ waiting for approval")),
+        h("div", { class: "codex-transcript" },
+          h("div", { class: "terminal-user" }, h("b", {}, "› You"), h("p", {}, sc.request)),
+          h("div", { class: "terminal-agent" }, h("b", {}, "• Codex"), h("p", {}, "I inspected the workspace and prepared this command.")),
+          review),
+        h("div", { class: "terminal-composer" }, "› Ask Codex to make a change", h("kbd", {}, "enter")));
+    }
+
+    if (harness === "cline") {
+      return h("section", { class: "harness harness-cline", "aria-label": `${label} interface` },
+        h("div", { class: "vscode-title" }, h("span", { class: "vscode-mark" }, "C"), h("strong", {}, "Cline"), h("span", {}, "sample-repo — Visual Studio Code")),
+        h("div", { class: "vscode-grid" },
+          h("nav", { class: "activity", "aria-hidden": "true" }, h("span", { class: "on" }, "▯"), h("span", {}, "⌕"), h("span", {}, "⑂"), h("span", {}, "⚙")),
+          h("div", { class: "cline-sidebar" },
+            h("div", { class: "side-title" }, "CLINE", h("span", {}, "···")),
+            h("div", { class: "cline-user" }, sc.request),
+            h("div", { class: "cline-status" }, "✓ Analyzed workspace", h("br"), "✓ Prepared command"),
+            review,
+            h("div", { class: "cline-composer" }, "Ask Cline…", h("span", {}, "↑"))),
+          workspacePreview(sc)));
+    }
+
+    return h("section", { class: "harness harness-openhands", "aria-label": `${label} interface` },
+      h("div", { class: "oh-title" }, h("strong", {}, "⌁ OpenHands"), h("span", {}, "sample-repo"), h("span", { class: "waiting" }, "● Waiting for confirmation")),
+      h("div", { class: "oh-grid" },
+        h("div", { class: "oh-thread" },
+          h("div", { class: "oh-user" }, h("b", {}, "You"), h("p", {}, sc.request)),
+          h("div", { class: "oh-agent" }, h("b", {}, "Agent"), h("p", {}, "I inspected the repository and prepared a file operation.")),
+          review,
+          h("div", { class: "oh-composer" }, "+  Ask the agent to make a change…", h("kbd", {}, "⌘ ↵"))),
+        workspacePreview(sc)));
+  }
+
   // ---------- home ----------
 
   function home() {
     app.replaceChildren(
       h("main", { class: "narrow" },
         h("h1", {}, "Reviewing AI agent file operations"),
-        h("p", { class: "lede" }, "A CSE 216 prototype. An AI assistant proposes a command that deletes, copies or moves files. You decide whether to let it run. Two ways of showing the command are compared: a plain confirmation prompt and a file-by-file preview."),
+        h("p", { class: "lede" }, "A CSE 216 prototype. An AI assistant proposes a command that deletes, copies or moves files. You decide whether to let it run. The same plain prompt and file-by-file preview are tested inside OpenHands, Cline and Codex CLI interfaces."),
         h("div", { class: "cards" },
           h("a", { class: "card", href: "#try" }, h("h2", {}, "Try the prototype"), h("p", {}, "Type any rm, cp or mv command against a mock file system and see what it would do before you approve it.")),
           h("a", { class: "card", href: "#survey" }, h("h2", {}, "Take the survey"), h("p", {}, "About 10 minutes, anonymous. Review 8 commands and tell us what you'd do.")),
-          h("a", { class: "card", href: "#demo" }, h("h2", {}, "Explore the demo"), h("p", {}, "Browse every scenario, switch between the two screens, and see the answer key."))),
+          h("a", { class: "card", href: "#demo" }, h("h2", {}, "Explore the demo"), h("p", {}, "Browse every scenario, switch screens and agent interfaces, and see the answer key."))),
         h("p", { class: "fine" }, "All files shown are made up. Nothing runs on your computer.")));
   }
 
@@ -233,6 +296,7 @@
   function demo() {
     let current = window.SCENARIOS[0];
     let condition = "structured";
+    let harness = "openhands";
     let showKey = false;
 
     const list = h("nav", { class: "demo-list", "aria-label": "Scenarios" });
@@ -248,9 +312,11 @@
           h("div", { class: "seg", role: "group", "aria-label": "Screen" },
             ["baseline", "structured"].map((c) => h("button", { class: c === condition ? "on" : "", "aria-pressed": c === condition ? "true" : "false", onclick: () => { condition = c; render(); } },
               c === "baseline" ? "Plain prompt" : "File preview"))),
+          h("div", { class: "seg", role: "group", "aria-label": "Harness" },
+            HARNESSES.map((item) => h("button", { class: item.id === harness ? "on" : "", "aria-pressed": item.id === harness ? "true" : "false", onclick: () => { harness = item.id; render(); } }, item.name))),
           h("label", { class: "toggle" }, h("input", { type: "checkbox", checked: showKey, onchange: (e) => { showKey = e.target.checked; render(); } }), " Show answer key")),
         requestCard(current),
-        reviewView(current, condition),
+        harnessView(current, condition, harness),
         showKey ? h("div", { class: "key " + (current.matches ? "key-ok" : "key-bad") },
           h("b", {}, current.matches ? "Matches the request. " : "Does not match the request. "), current.issue) : null));
     }
@@ -270,6 +336,10 @@
 
   function newSession() {
     const group = ["A1", "A2", "B1", "B2"][Math.floor(Math.random() * 4)];
+    const requestedHarness = new URLSearchParams(location.search).get("harness");
+    const harness = HARNESSES.some((item) => item.id === requestedHarness)
+      ? requestedHarness
+      : HARNESSES[Math.floor(Math.random() * HARNESSES.length)].id;
     // A: set X on the plain prompt, set Y on the preview. B: the reverse.
     // 1: plain prompt block first. 2: preview block first.
     const plainSet = group[0] === "A" ? "X" : "Y";
@@ -279,6 +349,7 @@
       id: (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)),
       version: window.SURVEY_CONFIG.version,
       group,
+      harness,
       startedAt: new Date().toISOString(),
       blocks: group[1] === "1" ? [plain, rich] : [rich, plain],
       background: {},
@@ -294,7 +365,7 @@
     steps.push(() => consentStep(s, next));
     steps.push(() => backgroundStep(s, next));
     s.blocks.forEach((block, bi) => {
-      steps.push(() => blockIntro(block, bi, next));
+      steps.push(() => blockIntro(s, block, bi, next));
       steps.push(() => trialStep(s, window.PRACTICE, block.condition, true, next));
       block.scenarios.forEach((sc) => steps.push(() => trialStep(s, sc, block.condition, false, next)));
       steps.push(() => ratingStep(s, block.condition, next));
@@ -311,6 +382,7 @@
     function show() {
       app.replaceChildren(
         h("header", { class: "bar" }, h("span", {}, "Survey"),
+          h("span", { class: "harness-badge" }, harnessName(s.harness)),
           h("div", { class: "progress", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": String(total - 1), "aria-valuenow": String(i) },
             h("div", { style: `width:${(100 * i) / (total - 1)}%` }))),
         steps[i]());
@@ -325,7 +397,7 @@
     box.addEventListener("change", () => { go.disabled = !box.checked; });
     return h("main", { class: "narrow" },
       h("h1", {}, "Before you start"),
-      h("p", {}, "This is a class project for CSE 216 at UC San Diego. You'll see 8 situations where an AI assistant wants to delete, copy or move files, and decide whether to let it. Then you'll answer a few questions about the two screens you used."),
+      h("p", {}, `This is a class project for CSE 216 at UC San Diego. You'll review 8 file operations in a ${harnessName(s.harness)}-style coding-agent interface and decide whether to let each one run. Then you'll answer a few questions about the two confirmation screens you used.`),
       h("ul", {},
         h("li", {}, "It takes about 10 minutes."),
         h("li", {}, "It's anonymous. We record your choices, how long each one took and your answers. No names or emails."),
@@ -352,11 +424,12 @@
       h("div", { class: "actions" }, go));
   }
 
-  function blockIntro(block, bi, next) {
+  function blockIntro(s, block, bi, next) {
     const plain = block.condition === "baseline";
     return h("main", { class: "narrow" },
       h("div", { class: "eyebrow" }, `Part ${bi + 1} of 2`),
       h("h1", {}, plain ? "The plain prompt" : "The file preview"),
+      h("p", { class: "assigned-harness" }, `Interface for this survey: ${harnessName(s.harness)}`),
       h("p", {}, plain
         ? "In this part, the assistant shows you the command it wants to run and a short description of what it thinks the command does."
         : "In this part, the assistant shows you the command plus a preview of every file it would change: what is deleted, moved, copied or replaced."),
@@ -371,7 +444,7 @@
 
   function trialStep(s, sc, condition, practice, next) {
     const shownAt = performance.now();
-    const trial = { scenario: sc.id, condition, practice };
+    const trial = { scenario: sc.id, condition, harness: s.harness, practice };
     const followup = h("div", { class: "followup" });
     const buttons = h("div", { class: "decide" },
       [["approve", "Approve"], ["reject", "Reject"], ["change", "Request change"]].map(([v, label]) =>
@@ -408,7 +481,7 @@
     return h("main", { class: "trial" },
       practice ? h("div", { class: "eyebrow" }, "Practice (not scored)") : null,
       requestCard(sc),
-      reviewView(sc, condition),
+      harnessView(sc, condition, s.harness),
       buttons,
       followup);
   }
@@ -470,6 +543,7 @@
 
     return h("main", { class: "narrow" },
       h("h1", {}, "Thank you!"),
+      h("p", { class: "assigned-harness" }, `You completed the ${harnessName(s.harness)} interface version.`),
       status,
       h("div", { class: "actions left" }, h("button", { onclick: download }, "Download my responses")),
       h("h2", {}, `You caught ${caught} of ${problems.length} problem commands`),
@@ -478,7 +552,7 @@
         const sc = window.SCENARIOS.find((x) => x.id === t.scenario);
         return h("li", { class: t.correct ? "right" : "wrong" },
           h("div", {}, h("code", {}, sc.command)),
-          h("div", { class: "fine" }, `${t.condition === "baseline" ? "Plain prompt" : "File preview"} · you chose ${t.decision === "change" ? "request change" : t.decision} · ${t.correct ? "✓" : "✗"}`),
+          h("div", { class: "fine" }, `${harnessName(t.harness || s.harness)} · ${t.condition === "baseline" ? "Plain prompt" : "File preview"} · you chose ${t.decision === "change" ? "request change" : t.decision} · ${t.correct ? "✓" : "✗"}`),
           h("div", {}, sc.issue));
       })),
       h("p", {}, h("a", { href: "#demo" }, "Explore all scenarios in the demo →")));

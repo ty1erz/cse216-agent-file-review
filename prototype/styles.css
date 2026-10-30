@@ -94,7 +94,7 @@ code, pre { font-family: var(--mono); }
 
 main { padding: 24px 16px 64px; margin: 0 auto; }
 .narrow { max-width: 680px; }
-.trial { max-width: 960px; }
+.trial { max-width: 1280px; }
 
 .bar {
   display: flex; align-items: center; gap: 16px;
@@ -127,6 +127,108 @@ main { padding: 24px 16px 64px; margin: 0 auto; }
 }
 .request-text { font-size: 1.15rem; margin: 2px 0 6px; }
 .today { font-size: 0.8rem; color: var(--muted); }
+
+/* Coding-agent harnesses. The confirmation content stays identical; only the
+   surrounding shell changes so interface style can be tested independently. */
+.harness {
+  margin-bottom: 12px; overflow: hidden; border-radius: 11px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+}
+.harness .review { margin: 0; border-radius: 7px; }
+.harness-badge, .assigned-harness {
+  display: inline-flex; align-items: center; width: fit-content;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface-2); color: var(--muted);
+  padding: 2px 9px; font-size: 0.78rem; font-weight: 650;
+}
+.assigned-harness { margin: 0 0 14px; }
+
+.workspace-preview { min-width: 0; background: #17191d; color: #c8ccd4; font: 12px/1.55 var(--mono); }
+.workspace-tabs { display: flex; gap: 2px; border-bottom: 1px solid #30343b; background: #202329; }
+.workspace-tabs span { padding: 8px 11px; color: #9299a7; }
+.workspace-tabs .active { color: #f0f2f5; border-bottom: 2px solid #6f8cff; }
+.workspace-file { min-height: 245px; }
+.workspace-path { padding: 9px 12px; color: #8d95a3; border-bottom: 1px solid #2d3037; }
+.workspace-diff { display: grid; padding: 14px 0; }
+.workspace-diff .line { padding: 2px 14px; white-space: pre-wrap; word-break: break-word; }
+.workspace-diff .dim { color: #777f8d; }
+.workspace-diff .minus { color: #ff9b99; background: rgba(180, 49, 49, 0.16); }
+.workspace-diff .plus { color: #78d89a; background: rgba(46, 160, 82, 0.15); }
+.workspace-terminal { padding: 9px 12px; border-top: 1px solid #30343b; color: #9aa2af; }
+
+/* OpenHands: conversation and workspace canvas. */
+.harness-openhands { background: #101216; color: #edf0f5; border: 1px solid #282c34; }
+.oh-title {
+  display: flex; align-items: center; gap: 16px; min-height: 44px;
+  padding: 0 14px; background: #17191e; border-bottom: 1px solid #292d35;
+  color: #a8afbd; font-size: 0.8rem;
+}
+.oh-title strong { color: #fff; font-size: 0.94rem; }
+.oh-title .waiting { margin-left: auto; color: #72d69a; }
+.oh-grid { display: grid; grid-template-columns: minmax(420px, 1.12fr) minmax(320px, 0.88fr); min-height: 430px; }
+.oh-thread { min-width: 0; padding: 16px; border-right: 1px solid #292d35; }
+.oh-user, .oh-agent { margin: 0 0 12px; padding: 10px 12px; border-radius: 8px; font-size: 0.88rem; }
+.oh-user { margin-left: 13%; background: #232833; }
+.oh-agent { margin-right: 13%; background: #191c22; border: 1px solid #2a2e37; }
+.oh-user p, .oh-agent p { margin: 3px 0 0; color: #c5cad4; }
+.oh-composer {
+  display: flex; justify-content: space-between; margin-top: 12px; padding: 11px 13px;
+  border: 1px solid #343946; border-radius: 8px; color: #7f8796; background: #17191e;
+}
+.oh-composer kbd { color: #abb2c0; font: inherit; }
+
+/* Cline: VS Code activity rail, chat side panel and editor workspace. */
+.harness-cline { background: #181818; color: #cccccc; border: 1px solid #353535; font-family: "Segoe UI", system-ui, sans-serif; }
+.vscode-title {
+  display: flex; align-items: center; gap: 10px; height: 35px; padding: 0 11px;
+  background: #181818; border-bottom: 1px solid #2b2b2b; color: #9d9d9d; font-size: 0.75rem;
+}
+.vscode-title strong { color: #d7d7d7; }
+.vscode-mark { display: grid; place-items: center; width: 19px; height: 19px; border-radius: 4px; background: #3274bd; color: #fff; font-weight: 800; }
+.vscode-grid { display: grid; grid-template-columns: 44px minmax(390px, 0.95fr) minmax(330px, 1.05fr); min-height: 450px; }
+.activity { display: flex; flex-direction: column; align-items: center; gap: 22px; padding: 15px 0; background: #181818; border-right: 1px solid #303030; color: #858585; font-size: 1.18rem; }
+.activity .on { color: #fff; border-left: 2px solid #fff; width: 100%; text-align: center; }
+.cline-sidebar { min-width: 0; padding: 11px; background: #202020; border-right: 1px solid #323232; }
+.side-title { display: flex; justify-content: space-between; padding: 1px 2px 12px; color: #bbb; font-size: 0.72rem; letter-spacing: 0.08em; }
+.cline-user { margin: 0 0 10px 12%; padding: 9px 11px; border-radius: 7px; background: #2b2b2b; color: #ddd; font-size: 0.84rem; }
+.cline-status { margin-bottom: 10px; color: #8fcf9f; font: 0.76rem/1.7 var(--mono); }
+.cline-sidebar .review { padding: 12px; }
+.cline-sidebar .preview-grid { grid-template-columns: 1fr; }
+.cline-sidebar .row { gap: 3px 5px; }
+.cline-sidebar .row .meta { width: 100%; padding-left: 1.2em; }
+.cline-composer { display: flex; justify-content: space-between; margin-top: 10px; padding: 10px; border: 1px solid #474747; border-radius: 6px; color: #888; }
+.cline-composer span { color: #fff; background: #0e639c; border-radius: 4px; padding: 0 5px; }
+
+/* Codex CLI: terminal transcript with a full-width approval overlay. */
+.harness-codex { background: #0b0c0d; color: #d8d8d2; border: 1px solid #292b2e; font-family: var(--mono); }
+.codex-title { display: flex; align-items: center; gap: 16px; padding: 9px 13px; border-bottom: 1px solid #2a2c30; color: #90959c; font-size: 0.76rem; }
+.codex-title strong { color: #f1f1ec; font-size: 0.9rem; }
+.codex-title .waiting { margin-left: auto; color: #e8b95c; }
+.codex-transcript { min-height: 360px; padding: 18px; }
+.terminal-user, .terminal-agent { max-width: 780px; margin-bottom: 16px; }
+.terminal-user b { color: #f4f4ef; }
+.terminal-agent b { color: #76d498; }
+.terminal-user p, .terminal-agent p { margin: 4px 0 0 17px; color: #b7bac0; }
+.harness-codex .review { max-width: 1040px; border: 1px solid #484b50; background: #151719; box-shadow: 0 0 0 1px #050505; }
+.harness-codex .prompt-head { color: #f0c66f; }
+.harness-codex .panel { border: 1px solid #32363d; }
+.terminal-composer { display: flex; justify-content: space-between; padding: 11px 14px; border-top: 1px solid #2b2d31; background: #101113; color: #7e848c; }
+.terminal-composer kbd { border: 1px solid #3a3d42; border-radius: 4px; padding: 0 5px; color: #aaaeb5; font: inherit; }
+
+@media (max-width: 900px) {
+  .oh-grid { grid-template-columns: 1fr; }
+  .oh-thread { border-right: 0; }
+  .oh-grid > .workspace-preview { border-top: 1px solid #292d35; }
+  .vscode-grid { grid-template-columns: 38px minmax(0, 1fr); }
+  .vscode-grid > .workspace-preview { display: none; }
+}
+
+@media (max-width: 540px) {
+  .oh-title span:not(.waiting), .vscode-title span:last-child, .codex-title > span:not(.waiting) { display: none; }
+  .harness .review { padding: 11px; }
+  .activity { display: none; }
+  .vscode-grid { grid-template-columns: 1fr; }
+}
 
 .review { border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
 .baseline, .structured { background: var(--term-bg); color: var(--term-text); }

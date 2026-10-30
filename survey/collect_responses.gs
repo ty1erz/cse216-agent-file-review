@@ -10,11 +10,11 @@ const RESPONSE_COLUMNS = [
   "terminal", "agents",
   "plain_affected", "plain_confident", "plain_easy", "plain_toomuch",
   "preview_affected", "preview_confident", "preview_easy", "preview_toomuch",
-  "prefer", "why", "missing", "raw_json",
+  "prefer", "why", "missing", "raw_json", "harness",
 ];
 const TRIAL_COLUMNS = [
   "id", "group", "order", "scenario", "screen", "decision", "correct",
-  "ms", "confidence", "comment",
+  "ms", "confidence", "comment", "harness",
 ];
 
 function sheet(name, columns) {
@@ -24,6 +24,17 @@ function sheet(name, columns) {
     s = book.insertSheet(name);
     s.appendRow(columns);
     s.setFrozenRows(1);
+  } else if (s.getLastRow() === 0) {
+    s.appendRow(columns);
+    s.setFrozenRows(1);
+  } else {
+    const current = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+    columns.forEach((column) => {
+      if (!current.includes(column)) {
+        s.getRange(1, s.getLastColumn() + 1).setValue(column);
+        current.push(column);
+      }
+    });
   }
   return s;
 }
@@ -44,6 +55,7 @@ function doPost(e) {
       plain.affected, plain.confident, plain.easy, plain.toomuch,
       rich.affected, rich.confident, rich.easy, rich.toomuch,
       fin.prefer, fin.why || "", fin.missing || "", e.postData.contents,
+      d.harness || "legacy",
     ]);
 
     const trials = sheet("trials", TRIAL_COLUMNS);
@@ -52,6 +64,7 @@ function doPost(e) {
         d.id, d.group, i + 1, t.scenario,
         t.condition === "baseline" ? "plain" : "preview",
         t.decision, t.correct, t.ms, t.confidence, t.comment || "",
+        t.harness || d.harness || "legacy",
       ]);
     });
     return ContentService.createTextOutput("ok");
