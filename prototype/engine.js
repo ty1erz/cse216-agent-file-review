@@ -8,7 +8,7 @@
   "use strict";
 
   function normalize(path) {
-    return path.replace(/^\.\//, "").replace(/\/+$/, "");
+    return path.replace(/^~\//, "").replace(/^\.\//, "").replace(/\/+$/, "");
   }
 
   function parentOf(path) {
@@ -73,22 +73,35 @@
     }
   }
 
-  // Shell-style wildcard for one path segment: * and ? never cross a "/".
+  // Shell-style wildcard for one path segment: *, ? and [abc] / [0-9] never cross a "/".
   function segmentRegex(seg) {
-    const body = seg.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]");
+    let body = "";
+    for (let i = 0; i < seg.length; i++) {
+      const c = seg[i];
+      const close = c === "[" ? seg.indexOf("]", i + 2) : -1;
+      if (c === "*") body += "[^/]*";
+      else if (c === "?") body += "[^/]";
+      else if (close !== -1) {
+        const set = seg.slice(i + 1, close).replace(/^!/, "^").replace(/\\/g, "\\\\");
+        body += "[" + set + "]";
+        i = close;
+      } else body += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
     return new RegExp("^" + body + "$");
   }
+
+  const WILDCARD = /[*?[]/;
 
   // Expand a pattern the way the shell would. A pattern that matches nothing
   // is passed through unchanged, like Bash does by default.
   function expand(tree, pattern) {
     pattern = normalize(pattern);
-    if (!/[*?]/.test(pattern)) return [pattern];
+    if (!WILDCARD.test(pattern)) return [pattern];
     let current = [""];
     for (const seg of pattern.split("/")) {
       const next = [];
       for (const base of current) {
-        if (!/[*?]/.test(seg)) {
+        if (!WILDCARD.test(seg)) {
           const p = join(base, seg);
           if (tree.exists(p)) next.push(p);
           continue;

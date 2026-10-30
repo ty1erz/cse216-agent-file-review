@@ -69,8 +69,8 @@
       h("p", { class: "prompt-q" }, "Do you want to proceed?"));
   }
 
-  function structuredView(sc) {
-    const result = Engine.simulate(sc.files, sc.command);
+  function structuredView(sc, precomputed) {
+    const result = precomputed || Engine.simulate(sc.files, sc.command);
     const sum = Engine.summarize(result);
     const outside = result.effects.filter((e) => Engine.outsideScope(e, sc.scope));
 
@@ -80,7 +80,8 @@
     if (sum.created) chips.push(chip("new", `Creates ${sum.created} file${sum.created > 1 ? "s" : ""}`));
     if (sum.overwritten) chips.push(chip("ovr", `Overwrites ${sum.overwritten} existing file${sum.overwritten > 1 ? "s" : ""}`));
     chips.push(sum.irreversible ? chip("warn", "Cannot be undone") : chip("ok", "Nothing is lost"));
-    if (outside.length) chips.push(chip("warn", `${outside.length} change${outside.length > 1 ? "s" : ""} outside ${scopeLabel(sc.scope)}`));
+    if (!sc.scope.length) chips.push(chip("neutral", "No folder named in the request"));
+    else if (outside.length) chips.push(chip("warn", `${outside.length} change${outside.length > 1 ? "s" : ""} outside ${scopeLabel(sc.scope)}`));
     else chips.push(chip("ok", `All changes inside ${scopeLabel(sc.scope)}`));
 
     return h("section", { class: "review structured", "aria-label": "File preview" },
@@ -220,6 +221,7 @@
         h("h1", {}, "Reviewing AI agent file operations"),
         h("p", { class: "lede" }, "A CSE 216 prototype. An AI assistant proposes a command that deletes, copies or moves files. You decide whether to let it run. Two ways of showing the command are compared: a plain confirmation prompt and a file-by-file preview."),
         h("div", { class: "cards" },
+          h("a", { class: "card", href: "#try" }, h("h2", {}, "Try the prototype"), h("p", {}, "Type any rm, cp or mv command against a mock file system and see what it would do before you approve it.")),
           h("a", { class: "card", href: "#survey" }, h("h2", {}, "Take the survey"), h("p", {}, "About 10 minutes, anonymous. Review 8 commands and tell us what you'd do.")),
           h("a", { class: "card", href: "#demo" }, h("h2", {}, "Explore the demo"), h("p", {}, "Browse every scenario, switch between the two screens, and see the answer key."))),
         h("p", { class: "fine" }, "All files shown are made up. Nothing runs on your computer.")));
@@ -483,9 +485,13 @@
 
   // ---------- routing ----------
 
+  // shared with playground.js
+  window.UI = { h, baselineView, structuredView, fmtSize, fmtDate, chip };
+
   function route() {
     const r = location.hash.replace("#", "");
-    if (r === "demo") demo();
+    if (r === "try") window.Playground(app);
+    else if (r === "demo") demo();
     else if (r === "survey") survey();
     else home();
   }

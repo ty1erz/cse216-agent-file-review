@@ -22,8 +22,18 @@ preview of every affected file.
 python3 -m http.server 8216 --directory prototype
 ```
 
-Then open http://localhost:8216. `#demo` shows every scenario with an answer
-key; `#survey` runs the study.
+Then open http://localhost:8216. Three modes:
+
+- `#try`: the interactive prototype. Type a request and any `rm`, `cp` or
+  `mv` command (with `-r`, `-f`, wildcards `* ? [ ]`, quoted names, and
+  chains with `&&` or `;`). The plain prompt and the file preview are computed
+  from what you type, against a mock file system. The folders your request is
+  about are inferred from its text, and you can edit them. Approve applies
+  the change to the mock files, and Undo reverts it.
+- `#demo`: every survey scenario, with an answer key.
+- `#survey`: the study.
+
+The interactive mode lives in `prototype/playground.js`.
 
 ### How the survey works
 
