@@ -8,11 +8,18 @@ preview of every affected file. Both screens are embedded in recognizable
 OpenHands, Cline and Codex CLI interaction shells so the prototype can also be
 evaluated in the context of current coding-agent interfaces.
 
+**Live:** [interactive prototype](https://ty1erz.github.io/cse216-agent-file-review/#try) ·
+[survey](https://ty1erz.github.io/cse216-agent-file-review/#survey) ·
+[demo with answer key](https://ty1erz.github.io/cse216-agent-file-review/#demo)
+
 ## What's here
 
 | Path | What it is |
 |---|---|
-| `prototype/` | Web prototype: both confirmation screens in three agent harnesses, plus the survey. No build step. |
+| `prototype/` | Web prototype: both confirmation screens in three agent harnesses, the interactive `#try` mode and the survey. No build step. |
+| `agent-proxy/` | Apps Script proxy that asks a model (Claude or UCSD TritonAI) for commands; the API key stays in its Script Properties. |
+| `survey/` | Apps Script collector that writes survey responses to the team's Google Sheet and confirms each save. |
+| `tests/` | Node tests for the engine, classifier, collector and survey submission; `tests/stress/` holds real model plans and the scripts that collect and replay them. |
 | `docs/experiment-design.md` | Integrated study design, assignment and analysis plan. |
 | `docs/third-party-notices.md` | Upstream interface references, revisions and licenses. |
 | `research/command_selection.md` | Why we chose `rm`, `cp` and `mv`, with data |
@@ -32,13 +39,14 @@ Then open http://localhost:8216. Three modes:
   sees the mock file tree and proposes the shell commands an agent would run.
   The page distinguishes supported file changes, an explicit set of read-only
   commands, and commands it cannot preview. Supported changes are `rm`, `cp`,
-  `mv`, `mkdir`, `rmdir` and `tar -c` (with common flags such as `-r`, `-n`,
-  `-u`, `-a` and `-t DIR`), plus `find` with `-delete` or `-exec rm/mv/cp {}`
-  and simple `for f in ...; do ...; done` loops, which are previewed as the
-  exact commands they expand to. Read-only pipelines (`find ... | sort`),
-  `2>/dev/null` and `||` are understood. Anything else blocks Approve. Approve applies the change to
-  the mock files, and Undo reverts it. You can edit the agent's commands, or
-  type your own when the model isn't connected.
+  `mv`, `mkdir`, `rmdir`, `tar -c` and `gzip` (with common flags such as `-r`,
+  `-n`, `-u`, `-a` and `-t DIR`), plus `find` with `-delete` or
+  `-exec rm/mv/cp {}` and simple `for f in ...; do ...; done` loops, which are
+  previewed as the exact commands they expand to. Read-only pipelines
+  (`find ... | sort`), `2>/dev/null` and `||` are understood. Anything else
+  blocks Approve. Approve applies the change to the mock files, and Undo
+  reverts it. You can edit the agent's commands, or type your own when the
+  model isn't connected.
 - `#demo`: every survey scenario, with selectors for the confirmation screen
   and agent harness, plus an answer key.
 - `#survey`: the study.
@@ -130,6 +138,8 @@ Run `npm test` with Node.js 20 or later; no packages need installing. Tests
 cover the command preview engine, command classification, async request state,
 survey collector and storage confirmation. CI runs them on every push and PR.
 For a manual check, open `#try`, `#demo`, and each fixed harness survey link.
+The interactive prototype is a separate demonstration; only `#survey` records
+study decisions. The study uses its displayed reference date for every file.
 
 `tests/model-plans.test.js` replays real model plans saved in
 `tests/stress/plans*.json` and fails if any of them stops previewing. To
@@ -142,14 +152,12 @@ node tests/stress/replay.js tests/stress/plans-new.json --verbose
 
 Requests live in `tests/stress/prompts.txt`; the workspace is the home folder
 from `prototype/scenarios.js` (`node tests/stress/dump_workspace.js`).
-The interactive prototype is a separate demonstration; only `#survey` records
-study decisions. The study uses its displayed reference date for every file.
 
 ### Publish online
 
 `.github/workflows/pages.yml` publishes `prototype/` to GitHub Pages on every
-push to `main`. Turn it on once under the repo's Settings → Pages → Source:
-GitHub Actions.
+push to `main` that changes it (Settings → Pages → Source: GitHub Actions is
+already enabled). Browsers may cache the old files for up to 10 minutes.
 
 ## Add your agent counts
 
