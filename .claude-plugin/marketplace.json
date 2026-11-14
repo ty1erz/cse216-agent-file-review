@@ -1,0 +1,11 @@
+{
+  "name": "cse216-agent-file-review",
+  "owner": { "name": "CSE 216 agent file review team" },
+  "plugins": [
+    {
+      "name": "file-review",
+      "source": "./",
+      "description": "Preview the files rm, cp and mv would change before approving them in Claude Code."
+    }
+  ]
+}

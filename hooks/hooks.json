@@ -1,0 +1,17 @@
+{
+  "description": "Preview the files a Bash command would delete, overwrite, move or create before you approve it",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/integrations/claude-code/pretooluse.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

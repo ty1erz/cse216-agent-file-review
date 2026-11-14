@@ -19,6 +19,8 @@ evaluated in the context of current coding-agent interfaces.
 | `prototype/` | Web prototype: both confirmation screens in three agent harnesses, the interactive `#try` mode and the survey. No build step. |
 | `agent-proxy/` | Apps Script proxy that asks a model (Claude or UCSD TritonAI) for commands; the API key stays in its Script Properties. |
 | `survey/` | Apps Script collector that writes survey responses to the team's Google Sheet and confirms each save. |
+| `integrations/` | Agent plugins that run the preview engine on real files. `core/` is harness-agnostic; `claude-code/` is the Claude Code hook. |
+| `.claude-plugin/`, `hooks/` | Claude Code plugin and marketplace manifests. |
 | `tests/` | Node tests for the engine, classifier, collector and survey submission; `tests/stress/` holds real model plans and the scripts that collect and replay them. |
 | `docs/experiment-design.md` | Integrated study design, assignment and analysis plan. |
 | `docs/third-party-notices.md` | Upstream interface references, revisions and licenses. |
@@ -158,6 +160,45 @@ from `prototype/scenarios.js` (`node tests/stress/dump_workspace.js`).
 `.github/workflows/pages.yml` publishes `prototype/` to GitHub Pages on every
 push to `main` that changes it (Settings → Pages → Source: GitHub Actions is
 already enabled). Browsers may cache the old files for up to 10 minutes.
+
+## Claude Code plugin
+
+`file-review` adds the file preview to Claude Code's own approval prompt.
+Before Claude runs a Bash command that uses `rm`, `cp` or `mv`, a PreToolUse
+hook snapshots the working folder, runs the same engine as the prototype on
+it, and asks you to approve with every deleted, overwritten, moved and created
+file listed. It never changes files itself. Commands it doesn't review get no
+output, so your usual permissions apply; reviewed commands it can't preview
+(paths outside the folder, `$(...)`, pipes into `xargs`) still prompt, with
+the reason.
+
+Try it from a checkout:
+
+```bash
+claude --plugin-dir /path/to/cse216-agent-file-review
+```
+
+Or install it from GitHub:
+
+```bash
+claude plugin marketplace add ty1erz/cse216-agent-file-review
+```
+
+```bash
+claude plugin install file-review@cse216-agent-file-review
+```
+
+Options (environment variables):
+
+| Variable | Effect |
+|---|---|
+| `FILE_REVIEW_COMMANDS` | Commands that trigger a review, default `rm,cp,mv`. The engine also supports `mkdir`, `rmdir`, `tar`, `gzip`. |
+| `FILE_REVIEW_STRICT=1` | Deny reviewed commands that can't be previewed, so Claude rewrites them, instead of asking. |
+
+Big folders such as `node_modules` and `.git` are only scanned when the
+command names them. To support another agent, add an adapter next to
+`integrations/claude-code/` that calls `reviewCommand()` from
+`integrations/core/review.js`.
 
 ## Add your agent counts
 
