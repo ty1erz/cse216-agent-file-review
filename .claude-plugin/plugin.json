@@ -2,8 +2,15 @@
   "name": "file-review",
   "version": "0.1.0",
   "description": "Shows every file an rm, cp or mv command would delete, overwrite, move or create, right in the approval prompt.",
-  "author": { "name": "CSE 216 agent file review team" },
+  "author": {
+    "name": "CSE 216 agent file review team"
+  },
   "repository": "https://github.com/ty1erz/cse216-agent-file-review",
-  "license": "MIT",
-  "keywords": ["safety", "review", "rm", "file-operations", "hooks"]
+  "keywords": [
+    "safety",
+    "review",
+    "rm",
+    "file-operations",
+    "hooks"
+  ]
 }
