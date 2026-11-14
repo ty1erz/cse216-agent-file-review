@@ -11,7 +11,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const ROOT = path.resolve(__dirname, "..");
-const { reviewCommand } = require("../integrations/core/review.js");
+const { reviewCommand, shortPath } = require("../integrations/core/review.js");
 const { decide } = require("../integrations/claude-code/pretooluse.js");
 
 function workspace(files) {
@@ -118,6 +118,15 @@ test("skips folders like node_modules unless the command names them", () => {
   assert.match(star.text, /contents of node_modules were not scanned/);
   const named = reviewCommand("rm -r node_modules", dir);
   assert.match(named.text, /node_modules\/pkg\/index\.js/);
+});
+
+test("keeps the header path short", () => {
+  assert.equal(shortPath("/Users/me/proj", "/Users/me"), "~/proj");
+  assert.equal(shortPath("/Users/me", "/Users/me"), "~");
+  assert.equal(shortPath("/srv/app", "/Users/me"), "/srv/app");
+  assert.equal(shortPath("/private/tmp/claude-501/some-very-long-session-id/scratchpad/live-test", "/Users/me"), "…/scratchpad/live-test");
+  const dir = workspace({ "a.txt": "a" });
+  assert.match(reviewCommand("rm a.txt", dir).text.split("\n")[0], /^File change preview \(in .{1,45}\)$/);
 });
 
 test("the hook script speaks Claude Code's stdin/stdout protocol", () => {

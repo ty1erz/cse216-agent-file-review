@@ -127,6 +127,16 @@ function humanSize(bytes) {
   return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
 }
 
+// Keep the header to one line in a narrow terminal: ~ for the home folder, and
+// only the last two folders of a long path.
+function shortPath(abs, home = os.homedir()) {
+  let p = abs;
+  if (home && (p === home || p.startsWith(home + path.sep))) p = "~" + p.slice(home.length);
+  if (p.length <= 40) return p;
+  const parts = p.split(path.sep).filter(Boolean);
+  return parts.length > 2 ? "…/" + parts.slice(-2).join("/") : p;
+}
+
 function plural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
 
 function friendly(text) {
@@ -192,7 +202,7 @@ function reviewCommand(command, cwd, options = {}) {
   const { P } = load();
   const moved = splitLeadingCd(command, cwd || process.cwd());
   const root = moved.cwd;
-  const header = `File change preview (in ${root})`;
+  const header = `File change preview (in ${shortPath(root)})`;
   const fail = (reason) => ({
     status: "unpreviewable",
     reason,
@@ -237,4 +247,4 @@ function reviewCommand(command, cwd, options = {}) {
   };
 }
 
-module.exports = { reviewCommand, enabledCommands, triggers, relativize, splitLeadingCd, snapshot, render, DEFAULT_COMMANDS };
+module.exports = { reviewCommand, enabledCommands, triggers, relativize, splitLeadingCd, snapshot, render, shortPath, DEFAULT_COMMANDS };
