@@ -68,18 +68,70 @@ function splitLeadingCd(command, cwd) {
   return { command: m[2], cwd: path.resolve(cwd, dir) };
 }
 
-// The engine only knows paths relative to its root. Rewrite absolute paths
-// that point inside the root, and ~ when the root is the home folder.
-function relativize(command, root) {
-  const home = os.homedir();
+// The engine only knows paths relative to its root, and it reads ~ as that
+// root. So expand an unquoted ~ to the real home folder first, then rewrite
+// absolute paths inside the root as relative ones. Paths that stay absolute
+// are outside the root, and the engine refuses them.
+function relativize(command, root, home = os.homedir()) {
   let out = command;
-  const prefixes = [root];
-  try { const real = fs.realpathSync(root); if (real !== root) prefixes.push(real); } catch {}
-  for (const prefix of prefixes) {
-    const esc = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    out = out.replace(new RegExp(`(^|[\\s'"=])${esc}(?=/|[\\s'"]|$)/?`, "g"), (_, lead) => lead + "./");
+  if (/(^|\s)~(?=\/|\s|$)/.test(out)) {
+    if (!/^[\w/.@+-]+$/.test(home)) return { command: out, error: "uses ~ and the home folder path has characters the preview cannot quote" };
+    out = out.replace(/(^|\s)~(?=\/|\s|$)/g, (_, lead) => lead + home);
   }
-  if (root === home) out = out.replace(/(^|\s)~(?=\/|\s|$)/g, "$1.");
+  const prefixes = new Set([root]);
+  try { prefixes.add(fs.realpathSync(root)); } catch {}
+  for (const p of [...prefixes]) if (p.startsWith("/private/")) prefixes.add(p.slice("/private".length));
+  // Longest first, so /private/tmp/x is not half-matched as /tmp/x.
+  for (const prefix of [...prefixes].sort((a, b) => b.length - a.length)) {
+    const esc = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // root/x -> x   and   root -> .   (a leading ./ would block globs)
+    out = out.replace(new RegExp(`(^|[\\s'"=])${esc}(/+|(?=[\\s'"]|$))`, "g"), (_, lead, slash) => lead + (slash ? "" : "."));
+  }
+  return { command: out, error: null };
+}
+
+// Agent habits that are harmless for files but outside the engine's subset:
+//   a trailing `&& cd ..` (it only moves the shell), and
+//   `if TEST; then CMD; fi` with one command, which changes files exactly
+//   like `TEST && CMD`; and
+//   brace lists such as invoice_0{4,5}.pdf, which Bash expands into separate
+//   words before anything else.
+// maskQuoted() keeps every character in place, so match positions found in
+// the masked text apply to the original.
+function normalizeHabits(command, maskQuoted) {
+  let out = command;
+  for (;;) {
+    const m = maskQuoted(out).text.match(/\s*(?:&&|;)\s*cd(?:\s+[^\s;&|]+)?\s*;?\s*$/);
+    if (!m) break;
+    out = out.slice(0, m.index);
+  }
+  for (;;) {
+    const m = /(?:^|;|&&)\s*(if\s+([^;&|]+?)\s*;\s*then\s+([^;|]+?)\s*;?\s*fi)(?=\s*(?:;|$))/d.exec(maskQuoted(out).text);
+    if (!m || /(^|\s)(if|then|else|elif|fi)(\s|$)/.test(m[3])) break;
+    const [start, end] = m.indices[1];
+    const cond = out.slice(...m.indices[2]);
+    const body = out.slice(...m.indices[3]);
+    out = out.slice(0, start) + `${cond} && ${body}` + out.slice(end);
+  }
+  return expandBraces(out, maskQuoted);
+}
+
+// Unquoted {a,b,c} inside a word becomes one word per item: x{1,2}y -> x1y x2y.
+// A {a..b} range or nested braces are left alone (the engine then refuses).
+function expandBraces(command, maskQuoted) {
+  let out = command;
+  for (let guard = 0; guard < 20; guard++) {
+    const masked = maskQuoted(out).text;
+    const m = /\{([^{}\s$]*,[^{}\s$]*)\}/.exec(masked);
+    if (!m) break;
+    let ws = m.index, we = m.index + m[0].length;
+    while (ws > 0 && !/[\s;&|]/.test(masked[ws - 1])) ws--;
+    while (we < masked.length && !/[\s;&|]/.test(masked[we])) we++;
+    const prefix = out.slice(ws, m.index);
+    const suffix = out.slice(m.index + m[0].length, we);
+    const items = out.slice(m.index + 1, m.index + m[0].length - 1).split(",");
+    out = out.slice(0, ws) + items.map((item) => prefix + item + suffix).join(" ") + out.slice(we);
+  }
   return out;
 }
 
@@ -210,7 +262,9 @@ function reviewCommand(command, cwd, options = {}) {
   });
 
   if (!fs.existsSync(root)) return fail(`folder ${root} does not exist`);
-  const local = relativize(moved.command, root);
+  const rel = relativize(normalizeHabits(moved.command, P.maskQuoted), root);
+  if (rel.error) return fail(rel.error);
+  const local = rel.command;
   const snap = snapshot(root, local);
   if (snap.truncated) return fail(`the folder has more than ${MAX_ENTRIES} entries`);
 
@@ -250,4 +304,4 @@ function reviewCommand(command, cwd, options = {}) {
   };
 }
 
-module.exports = { reviewCommand, enabledCommands, triggers, relativize, splitLeadingCd, snapshot, render, shortPath, DEFAULT_COMMANDS };
+module.exports = { reviewCommand, enabledCommands, triggers, relativize, normalizeHabits, splitLeadingCd, snapshot, render, shortPath, DEFAULT_COMMANDS };

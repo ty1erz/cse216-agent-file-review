@@ -162,3 +162,48 @@ test("the demo folder previews the overwrite it promises", () => {
   assert.match(r.text, /OVERWRITE 2 files/);
   assert.match(r.text, /\+ photos\/IMG_0003\.jpg/);
 });
+
+test("~ means the real home folder, never the working folder", () => {
+  // Before this fix `rm -f ~/x` was read as `rm -f <cwd>/x`, found nothing and
+  // produced no prompt at all.
+  const dir = workspace({ "notes.txt": "n" });
+  const out = decide(bash("rm -f ~/notes.txt", dir));
+  assert.ok(out, "a command touching the home folder must not pass silently");
+  assert.equal(out.hookSpecificOutput.permissionDecision, "ask");
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /Could not preview/);
+  assert.doesNotMatch(out.hookSpecificOutput.permissionDecisionReason, /notes\.txt {2}\d/);
+});
+
+test("absolute paths with globs preview like relative ones", () => {
+  const dir = workspace({ "build/a.tmp": "1", "build/b.tmp": "2", "build/app.js": "3" });
+  const r = reviewCommand(`rm ${dir}/build/*.tmp`, dir);
+  assert.equal(r.status, "preview");
+  assert.match(r.text, /DELETE 2 files/);
+  const quoted = reviewCommand(`cp "${dir}/build/app.js" "${dir}/build/app copy.js"`, path.join(dir, "build"));
+  assert.equal(quoted.status, "preview", quoted.text);
+  assert.match(quoted.text, /\+ app copy\.js/);
+  // The parent folder is outside the working folder, so it is refused.
+  assert.equal(reviewCommand(`cp "${dir}/build/app.js" "${dir}"`, path.join(dir, "build")).status, "unpreviewable");
+});
+
+test("common agent habits are understood", () => {
+  const dir = workspace({ "Downloads/invoice_04.pdf": "a", "Downloads/invoice_05.pdf": "b", "Downloads/tax.pdf": "t",
+    "finance/2026/": "", "reports/v2.docx": "r", "build/x.tmp": "x", "logs/a.log": "1", "logs/b.log": "2" });
+  const cases = [
+    ["mv Downloads/invoice_0{4,5}.pdf finance/2026/", /MOVE 2 files/],
+    ["for f in logs/{a,b}.log; do rm \"$f\"; done", /DELETE 2 files/],
+    ["if [ ! -e reports/final.docx ]; then mv reports/v2.docx reports/final.docx; fi", /v2\.docx -> reports\/final\.docx/],
+    ["cd build && rm -f *.tmp && cd ..", /DELETE 1 file/],
+    ["rm -rf build/ dist/", /DELETE 1 file/],
+  ];
+  for (const [command, expected] of cases) {
+    const r = reviewCommand(command, dir);
+    assert.equal(r.status, "preview", `${command}\n${r.text}`);
+    assert.match(r.text, expected, command);
+    assert.doesNotMatch(r.text, /Partly/, command);
+  }
+  // Left alone, so the engine refuses rather than guesses.
+  assert.equal(reviewCommand("if [ -d build ]; then rm -r build; else echo no; fi", dir).status, "unpreviewable");
+  assert.equal(reviewCommand("rm logs/{a..b}.log", dir).status, "unpreviewable");
+  assert.equal(reviewCommand('rm "logs/{a,b}.log"', dir).effects.length, 0);
+});

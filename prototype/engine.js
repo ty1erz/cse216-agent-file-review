@@ -525,7 +525,9 @@
       for (const operand of operands) {
         const expanded = expandToken(tree, operand);
         if (expanded.error) return { paths: [], error: expanded.error };
-        if (operand.value.endsWith("/") && expanded.paths.some((path) => !tree.isDir(path))) {
+        // A missing path falls through to the command's own "no such file"
+        // handling (which rm -f ignores); only an existing file is an error.
+        if (operand.value.endsWith("/") && expanded.paths.some((path) => tree.isFile(path))) {
           return { paths: [], error: `Path ending in / is not a folder: ${operand.value}` };
         }
         paths.push(...expanded.paths);
