@@ -6,12 +6,21 @@
 
 "use strict";
 
+const fs = require("node:fs");
 const { reviewCommand } = require("../core/review.js");
 
-function decide(input, env = process.env) {
-  if (!input || input.tool_name !== "Bash") return null;
+function evaluate(input, env = process.env) {
+  if (!input || input.tool_name !== "Bash") return { review: null, output: null };
   const command = input.tool_input && input.tool_input.command;
   const review = reviewCommand(command, input.cwd || process.cwd(), { env });
+  return { review, output: outputFor(review, env) };
+}
+
+function decide(input, env = process.env) {
+  return evaluate(input, env).output;
+}
+
+function outputFor(review, env) {
   if (review.status === "skip") return null;
   // An empty preview (e.g. `rm -f missing.txt`) changes nothing; let it through
   // to Claude Code's own permission rules instead of adding a prompt.
@@ -35,8 +44,22 @@ function main() {
   process.stdin.on("data", (chunk) => { raw += chunk; });
   process.stdin.on("end", () => {
     try {
-      const out = decide(JSON.parse(raw || "{}"));
-      if (out) process.stdout.write(JSON.stringify(out));
+      const input = JSON.parse(raw || "{}");
+      const { review, output } = evaluate(input);
+      if (output) process.stdout.write(JSON.stringify(output));
+      // FILE_REVIEW_LOG=<file.jsonl> records every Bash command and what the
+      // plugin did with it, for checking coverage against real agent runs.
+      if (process.env.FILE_REVIEW_LOG && review) {
+        fs.appendFileSync(process.env.FILE_REVIEW_LOG, JSON.stringify({
+          time: new Date().toISOString(),
+          cwd: input.cwd,
+          command: input.tool_input.command,
+          status: review.status,
+          decision: output ? output.hookSpecificOutput.permissionDecision : "none",
+          effects: review.effects ? review.effects.length : 0,
+          text: review.text || "",
+        }) + "\n");
+      }
     } catch (err) {
       // Never break the Bash tool because the preview failed; fall back to the
       // normal prompt and leave a trace for `claude --debug`.
@@ -47,4 +70,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { decide };
+module.exports = { decide, evaluate };

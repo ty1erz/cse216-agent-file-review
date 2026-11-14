@@ -204,6 +204,19 @@ Options (environment variables):
 | `FILE_REVIEW_COMMANDS` | Commands that trigger a review, default `rm,cp,mv`. The engine also supports `mkdir`, `rmdir`, `tar`, `gzip`. |
 | `FILE_REVIEW_STRICT=1` | Deny reviewed commands that can't be previewed, so Claude rewrites them, instead of asking. |
 
+To check coverage against real Claude Code, run each request in
+`tests/stress/prompts.txt` headless in a fresh demo folder. Every Bash command
+Claude tries and the plugin's decision is logged (`FILE_REVIEW_LOG`); headless
+runs cannot answer "ask", so the demo folders are not changed. It uses your
+Claude Code login and usage:
+
+```bash
+node tests/stress/run_claude_code.js /tmp/fr-runs --jobs 6 --only delete,copy,move,rename,combined,risky
+```
+
+The report lists commands the plugin could not preview and file-changing
+commands it does not review. Re-print it with `--report`.
+
 Big folders such as `node_modules` and `.git` are only scanned when the
 command names them. To support another agent, add an adapter next to
 `integrations/claude-code/` that calls `reviewCommand()` from

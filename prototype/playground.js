@@ -81,7 +81,8 @@
       let j = i;
       while (!/(^|[\s;])done$/.test(text) && j + 1 < parts.length) {
         j++;
-        text += (parts[j].connector === "&&" ? " && " : "; ") + parts[j].cmd;
+        const c = parts[j].connector;
+        text += (c === "&&" || c === "||" ? ` ${c} ` : "; ") + parts[j].cmd;
       }
       if (!/(^|[\s;])done$/.test(text)) parseError ||= "The for loop has no done.";
       grouped.push({ cmd: text, connector: parts[i].connector });
@@ -286,8 +287,11 @@
         continue;
       }
       if (conditional && priorSucceeded == null) {
-        blocked = true;
-        steps.push({ ...part, cls, skipped: true, skipReason: "the previous read-only command's exit status cannot be determined" });
+        // Whether a read-only step runs (e.g. `&& cmp a b && echo ok`) cannot
+        // change any file, so it does not block; a change here still does.
+        const harmless = cls.kind === "readonly";
+        if (!harmless) blocked = true;
+        steps.push({ ...part, cls, skipped: true, harmless, skipReason: "the previous read-only command's exit status cannot be determined" });
         continue;
       }
       if (stateUnknown) {
@@ -297,8 +301,9 @@
       }
       if (cls.kind === "readonly") {
         priorSucceeded = cls.alwaysSucceeds ? true : cls.pipeline ? null : readonlyStatus(stripNullRedirects(part.cmd), files);
-        // A read-only step that fails in the mock means the plan would not run as written.
-        if (priorSucceeded === false) blocked = true;
+        // A read-only step that fails in the mock means the plan would not run
+        // as written, except a [ ] / test condition, whose job is to be false.
+        if (priorSucceeded === false && cls.name !== "[" && cls.name !== "test") blocked = true;
         steps.push({ ...part, cls, success: priorSucceeded });
         continue;
       }
@@ -316,21 +321,44 @@
         let groups = null, reason = "", extraErrors = [];
         if (cls.name === "for") {
           const u = Engine.unrollFor(files, cmd);
-          if (u.error) reason = u.error; else groups = u.iterations;
+          if (u.error) reason = u.error;
+          else {
+            // Run the unrolled iterations as one ordinary sequence, so [ ]
+            // checks, || and read-only steps inside the body work as they do
+            // outside a loop. Iterations are separate lists, joined by ";".
+            const text = u.iterations.map((iter) => iter.map((s, k) => (k ? ` ${s.connector} ` : "") + s.cmd).join("")).join("; ");
+            const inner = simulateSequence(text, files);
+            const bad = inner.steps.find((s) => (s.r && s.r.blocked) || (!s.skipped && s.cls.kind === "changes")
+              || (s.skipped && !s.harmless && !/^the previous command (failed|succeeded)$/.test(s.skipReason)));
+            if (bad) reason = bad.r && bad.r.blocked ? `${bad.cmd}: ${bad.r.errors.join("; ")}` : `${bad.cmd} ${bad.cls.reason || bad.skipReason}`;
+            else {
+              const done = inner.steps.filter((s) => s.r);
+              r = {
+                effects: done.flatMap((s) => s.r.effects),
+                errors: done.flatMap((s) => s.r.errors),
+                notes: done.flatMap((s) => s.r.notes || []),
+                ran: inner.steps.filter((s) => !s.skipped).map((s) => s.cmd),
+                blocked: false,
+                after: new Engine.FileTree(inner.finalFiles),
+              };
+            }
+          }
         } else {
           const f = Engine.runFind(files, cmd);
           if (f.error) reason = f.error;
           else { groups = [f.commands.map((c) => ({ cmd: c, connector: ";" }))]; extraErrors = f.errors; }
         }
-        if (!groups) {
+        if (!groups && !r) {
           blocked = true;
           stateUnknown = true;
           priorSucceeded = null;
           steps.push({ ...part, cls: { kind: "changes", name: cls.name, reason: reason.replace(/^(find|for loop): /, "") }, success: null });
           continue;
         }
-        r = Engine.simulateMany(files, groups);
-        r.errors.push(...extraErrors);
+        if (!r) {
+          r = Engine.simulateMany(files, groups);
+          r.errors.push(...extraErrors);
+        }
       } else {
         r = Engine.simulate(files, cmd);
       }

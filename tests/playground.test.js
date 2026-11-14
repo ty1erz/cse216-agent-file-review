@@ -247,3 +247,27 @@ test("find and for loops are previewed as the exact commands they run", () => {
   // loop bodies may only use the loop variable
   assert.equal(simulateSequence('for f in pics/*; do mv "$f" "$DEST"; done', files).blocked, true);
 });
+
+test("loop bodies keep || and evaluate [ ] checks per iteration", () => {
+  const { parseCommandSequence, simulateSequence } = loadInternals();
+  const grouped = parseCommandSequence('for f in a b; do [ -e "x_$f" ] && echo skip || mv "$f" "x_$f"; done');
+  assert.equal(grouped.length, 1);
+  assert.match(grouped[0].cmd, /echo skip \|\| mv/);
+
+  const files = [{ path: "a", size: 1 }, { path: "b", size: 2 }, { path: "x_b", size: 3 }];
+  const r = simulateSequence('for f in a b; do [ -e "x_$f" ] && echo skip || mv "$f" "x_$f"; done', files);
+  assert.equal(r.blocked, false);
+  const paths = Array.from(r.finalFiles, (f) => f.path).sort();
+  // a is renamed; b is kept because x_b already exists.
+  assert.deepEqual(paths, ["b", "x_a", "x_b"]);
+});
+
+test("read-only verification after a change does not block it", () => {
+  const { simulateSequence } = loadInternals();
+  const files = [{ path: "c/a.yaml", size: 1 }, { path: "backup/" }];
+  const r = simulateSequence("cp c/a.yaml backup/ && cmp c/a.yaml backup/a.yaml && echo VERIFIED", files);
+  assert.equal(r.blocked, false);
+  assert.equal(r.steps[2].harmless, true);
+  // A change whose running depends on an unknown status still blocks.
+  assert.equal(simulateSequence("cmp c/a.yaml backup/a.yaml && rm c/a.yaml", files).blocked, true);
+});
