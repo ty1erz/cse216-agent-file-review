@@ -188,6 +188,15 @@ claude plugin marketplace add ty1erz/cse216-agent-file-review
 claude plugin install file-review@cse216-agent-file-review
 ```
 
+To see it in action, build a throwaway copy of the study's mock home folder
+(sparse files, so it takes no real space) and follow the requests it prints,
+such as "Copy the new photos from camera into my photos library", which
+overwrites two photos:
+
+```bash
+npm run demo -- /tmp/file-review-demo
+```
+
 Options (environment variables):
 
 | Variable | Effect |

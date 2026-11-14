@@ -140,3 +140,13 @@ test("the hook script speaks Claude Code's stdin/stdout protocol", () => {
   assert.equal(execFileSync(process.execPath, [script], { input: "not json", encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }), "");
   assert.ok(fs.existsSync(path.join(dir, "a.txt")));
 });
+
+test("the demo folder previews the overwrite it promises", () => {
+  const { build } = require("../integrations/claude-code/demo.js");
+  const dir = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "file-review-demo-"))), "home");
+  assert.ok(build(dir) > 40);
+  assert.equal(fs.statSync(path.join(dir, "photos/IMG_0001.jpg")).size > 1e6, true);
+  const r = reviewCommand("cp camera/*.jpg photos/", dir);
+  assert.match(r.text, /OVERWRITE 2 files/);
+  assert.match(r.text, /\+ photos\/IMG_0003\.jpg/);
+});
