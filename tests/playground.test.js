@@ -153,6 +153,30 @@ test("read-only steps that read paths succeed exactly when the paths exist", () 
   assert.equal(fallback.finalFiles.some((file) => file.path.startsWith("old")), false);
 });
 
+test("[ ] and test file checks decide which branch runs", () => {
+  const { simulateSequence, readonlyStatus } = loadInternals();
+  const files = [{ path: "a.txt", size: 3 }, { path: "empty.txt", size: 0 }, { path: "dir/b.txt", size: 1 }];
+
+  assert.equal(readonlyStatus("[ -e a.txt ]", files), true);
+  assert.equal(readonlyStatus("[ -e missing ]", files), false);
+  assert.equal(readonlyStatus("[ ! -e missing ]", files), true);
+  assert.equal(readonlyStatus("[ -d dir ]", files), true);
+  assert.equal(readonlyStatus("[ -f dir ]", files), false);
+  assert.equal(readonlyStatus("test -s empty.txt", files), false);
+  assert.equal(readonlyStatus('test -f "a.txt"', files), true);
+  // Outside the bounded subset: stays unknown rather than guessed.
+  for (const command of ["[ -e *.txt ]", "[ -e a.txt", "[ -n x ]", "[ -e a.txt -a -e b ]", "[ -e /etc/hosts ]"]) {
+    assert.equal(readonlyStatus(command, files), null, command);
+  }
+
+  const guarded = simulateSequence('[ -e b.txt ] && echo "exists" || mv -n a.txt b.txt', files);
+  assert.equal(guarded.steps[1].skipped, true);
+  assert.equal(guarded.finalFiles.some((file) => file.path === "b.txt"), true);
+  const kept = simulateSequence('[ -e a.txt ] && echo "exists" || mv dir/b.txt a.txt', files);
+  assert.equal(kept.steps[2].skipped, true);
+  assert.equal(kept.finalFiles.some((file) => file.path === "dir/b.txt"), true);
+});
+
 test("request coordinator invalidates and aborts stale work", () => {
   const { createRequestCoordinator } = loadInternals();
   const requests = createRequestCoordinator();
@@ -222,4 +246,28 @@ test("find and for loops are previewed as the exact commands they run", () => {
   assert.equal(simulateSequence("find . -delete", files).blocked, true);
   // loop bodies may only use the loop variable
   assert.equal(simulateSequence('for f in pics/*; do mv "$f" "$DEST"; done', files).blocked, true);
+});
+
+test("loop bodies keep || and evaluate [ ] checks per iteration", () => {
+  const { parseCommandSequence, simulateSequence } = loadInternals();
+  const grouped = parseCommandSequence('for f in a b; do [ -e "x_$f" ] && echo skip || mv "$f" "x_$f"; done');
+  assert.equal(grouped.length, 1);
+  assert.match(grouped[0].cmd, /echo skip \|\| mv/);
+
+  const files = [{ path: "a", size: 1 }, { path: "b", size: 2 }, { path: "x_b", size: 3 }];
+  const r = simulateSequence('for f in a b; do [ -e "x_$f" ] && echo skip || mv "$f" "x_$f"; done', files);
+  assert.equal(r.blocked, false);
+  const paths = Array.from(r.finalFiles, (f) => f.path).sort();
+  // a is renamed; b is kept because x_b already exists.
+  assert.deepEqual(paths, ["b", "x_a", "x_b"]);
+});
+
+test("read-only verification after a change does not block it", () => {
+  const { simulateSequence } = loadInternals();
+  const files = [{ path: "c/a.yaml", size: 1 }, { path: "backup/" }];
+  const r = simulateSequence("cp c/a.yaml backup/ && cmp c/a.yaml backup/a.yaml && echo VERIFIED", files);
+  assert.equal(r.blocked, false);
+  assert.equal(r.steps[2].harmless, true);
+  // A change whose running depends on an unknown status still blocks.
+  assert.equal(simulateSequence("cmp c/a.yaml backup/a.yaml && rm c/a.yaml", files).blocked, true);
 });

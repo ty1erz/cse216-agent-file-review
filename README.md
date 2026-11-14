@@ -6,11 +6,14 @@ When an AI agent wants to delete, copy or move files, a plain "Approve?" prompt
 rarely shows *which* files change. We compare that prompt with a structured
 preview of every affected file. Both screens are embedded in recognizable
 OpenHands, Cline and Codex CLI interaction shells so the prototype can also be
-evaluated in the context of current coding-agent interfaces.
+evaluated in the context of current coding-agent interfaces. The same preview
+also runs inside a real agent: the `file-review` plugin shows it in Claude
+Code's own approval prompt.
 
 **Live:** [interactive prototype](https://ty1erz.github.io/cse216-agent-file-review/#try) ·
 [survey](https://ty1erz.github.io/cse216-agent-file-review/#survey) ·
-[demo with answer key](https://ty1erz.github.io/cse216-agent-file-review/#demo)
+[demo with answer key](https://ty1erz.github.io/cse216-agent-file-review/#demo) ·
+[Claude Code plugin](#claude-code-plugin)
 
 ## What's here
 
@@ -19,7 +22,9 @@ evaluated in the context of current coding-agent interfaces.
 | `prototype/` | Web prototype: both confirmation screens in three agent harnesses, the interactive `#try` mode and the survey. No build step. |
 | `agent-proxy/` | Apps Script proxy that asks a model (Claude or UCSD TritonAI) for commands; the API key stays in its Script Properties. |
 | `survey/` | Apps Script collector that writes survey responses to the team's Google Sheet and confirms each save. |
-| `tests/` | Node tests for the engine, classifier, collector and survey submission; `tests/stress/` holds real model plans and the scripts that collect and replay them. |
+| `integrations/` | Runs the preview engine on real files. `core/` works for any agent; `claude-code/` holds the Claude Code hook and the demo folder builder. |
+| `.claude-plugin/`, `hooks/` | Claude Code plugin manifest, marketplace entry and hook registration. |
+| `tests/` | Node tests for the engine, classifier, plugin, collector and survey submission. `tests/stress/` holds real model plans, the scripts that collect and replay them, and the headless Claude Code runner. |
 | `docs/experiment-design.md` | Integrated study design, assignment and analysis plan. |
 | `docs/third-party-notices.md` | Upstream interface references, revisions and licenses. |
 | `research/command_selection.md` | Why we chose `rm`, `cp` and `mv`, with data |
@@ -43,7 +48,8 @@ Then open http://localhost:8216. Three modes:
   `-n`, `-u`, `-a` and `-t DIR`), plus `find` with `-delete` or
   `-exec rm/mv/cp {}` and simple `for f in ...; do ...; done` loops, which are
   previewed as the exact commands they expand to. Read-only pipelines
-  (`find ... | sort`), `2>/dev/null` and `||` are understood. Anything else
+  (`find ... | sort`), `2>/dev/null`, `&&` / `||` and file checks such as
+  `[ -e path ]` or `test -d dir` are understood. Anything else
   blocks Approve. Approve applies the change to the mock files, and Undo
   reverts it. You can edit the agent's commands, or type your own when the
   model isn't connected.
@@ -132,11 +138,139 @@ approve. Deploy the web app with access for the intended participants and set
 `agentUrl` to that deployment's `/exec` URL. Opening it should return
 `{"ok":true,"configured":true}`. The key never appears in the front end.
 
+## Claude Code plugin
+
+`file-review` brings the file preview to Claude Code. Before Claude runs a Bash
+command that uses `rm`, `cp` or `mv`, the approval prompt lists every file the
+command would delete, overwrite, move or create:
+
+```text
+Bash command
+  rm -rf build *.log
+Hook PreToolUse:Bash requires confirmation for this command:
+File change preview (in …/live-test)
+DELETE 3 files (4.0 KB) and 2 folders — cannot be undone
+  - build/app.js  4.0 KB
+  - build/maps/app.js.map  4 B
+  - debug.log  4 B
+Do you want to proceed?
+❯ 1. Yes
+  2. No
+```
+
+The plugin never changes files itself; you still choose Yes or No.
+
+### Install
+
+You need Claude Code and Node.js 20 or later (the hook runs `node`).
+
+To try it for one session from a checkout:
+
+```bash
+claude --plugin-dir /path/to/cse216-agent-file-review
+```
+
+To install it for every session (reads the `main` branch):
+
+```bash
+claude plugin marketplace add ty1erz/cse216-agent-file-review
+```
+
+```bash
+claude plugin install file-review@cse216-agent-file-review
+```
+
+Turn it off with `claude plugin disable file-review`.
+
+### Try it on the demo folder
+
+This builds a throwaway copy of the study's mock home folder. The files are
+sparse, so they show realistic sizes but take no real space, and nothing
+there matters if it gets deleted:
+
+```bash
+npm run demo -- /tmp/file-review-demo
+```
+
+```bash
+cd /tmp/file-review-demo && claude --plugin-dir /path/to/cse216-agent-file-review
+```
+
+The script prints requests to try and the preview each should produce. A good
+first one is "Copy the new photos from camera into my photos library": it
+sounds harmless, and the prompt shows it would overwrite two photos.
+
+### Settings
+
+Set these as environment variables before starting `claude`:
+
+| Variable | Effect |
+|---|---|
+| `FILE_REVIEW_COMMANDS` | Commands that trigger a review. Default `rm,cp,mv`; the engine also supports `mkdir`, `rmdir`, `tar` and `gzip`. |
+| `FILE_REVIEW_STRICT=1` | Refuse reviewed commands that can't be previewed, so Claude rewrites them, instead of asking. |
+| `FILE_REVIEW_LOG=<file.jsonl>` | Append every Bash command and the plugin's decision to a file. |
+
+### How it works
+
+1. `hooks/hooks.json` registers a PreToolUse hook on Claude Code's Bash tool.
+   Before each Bash command, Claude Code runs
+   `integrations/claude-code/pretooluse.js` and passes it the command.
+2. `integrations/core/review.js` checks whether the command runs a reviewed
+   command (or `find -delete`). If not, the hook prints nothing and Claude
+   Code's usual permissions apply.
+3. Otherwise it records the names, sizes and dates of files in the working
+   folder (never their contents), runs `prototype/engine.js` on that list,
+   and answers "ask" with the preview.
+4. If it cannot simulate the command faithfully, it still answers "ask", with
+   "Could not preview" and the reason. A reviewed command never runs without a
+   prompt.
+
+It also handles common agent habits: a leading `cd DIR &&`, absolute paths
+inside the folder, `~`, brace lists like `a{1,2}.pdf`, single-command
+`if …; then …; fi`, and read-only checks such as `&& cmp a b && echo OK`.
+Big folders such as `node_modules` and `.git` are only scanned when the
+command names them.
+
+### Other agents
+
+`integrations/core/` has nothing specific to Claude Code. To support another
+agent, add an adapter next to `integrations/claude-code/` that passes the
+command and folder to `reviewCommand()` and turns its result into that
+agent's approval format.
+
+### Testing against real Claude Code
+
+`tests/stress/run_claude_code.js` runs each request in
+`tests/stress/prompts.txt` through headless Claude Code with the plugin, each
+in a fresh demo folder, and logs every Bash command Claude tries. Headless
+runs cannot answer "ask", so the demo folders are not changed. It uses your
+Claude Code login and usage:
+
+```bash
+node tests/stress/run_claude_code.js /tmp/fr-runs --jobs 6 --only delete,copy,move,rename,combined,risky
+```
+
+The report lists commands the plugin could not preview and file-changing
+commands it does not review; reprint it with `--report`. In the last run (44
+requests, 156 commands), 26 of 32 reviewed commands previewed fully.
+
+### Known limitations
+
+These still ask with "Could not preview":
+
+- loop bodies with other expansions (`${f:11:10}`, `$(echo … | sed …)`)
+- `cd subdir && mv ../../x …`
+- `\` line continuations and variables such as `B=…; mv $B/…`
+- `xargs` pipelines
+
+`tar`, `rmdir`, `rsync` and `git mv` are not reviewed by default.
+
 ## Verify changes
 
 Run `npm test` with Node.js 20 or later; no packages need installing. Tests
-cover the command preview engine, command classification, async request state,
-survey collector and storage confirmation. CI runs them on every push and PR.
+cover the command preview engine, command classification, the Claude Code
+plugin (on temporary folders), async request state, survey collector and
+storage confirmation. CI runs them on every push and PR.
 For a manual check, open `#try`, `#demo`, and each fixed harness survey link.
 The interactive prototype is a separate demonstration; only `#survey` records
 study decisions. The study uses its displayed reference date for every file.
@@ -158,6 +292,11 @@ from `prototype/scenarios.js` (`node tests/stress/dump_workspace.js`).
 `.github/workflows/pages.yml` publishes `prototype/` to GitHub Pages on every
 push to `main` that changes it (Settings → Pages → Source: GitHub Actions is
 already enabled). Browsers may cache the old files for up to 10 minutes.
+
+### Contributing
+
+`main` is protected: push a branch and open a pull request. No approval is
+required, so you can merge your own PR once CI passes.
 
 ## Add your agent counts
 

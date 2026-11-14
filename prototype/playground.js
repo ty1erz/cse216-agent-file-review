@@ -81,7 +81,8 @@
       let j = i;
       while (!/(^|[\s;])done$/.test(text) && j + 1 < parts.length) {
         j++;
-        text += (parts[j].connector === "&&" ? " && " : "; ") + parts[j].cmd;
+        const c = parts[j].connector;
+        text += (c === "&&" || c === "||" ? ` ${c} ` : "; ") + parts[j].cmd;
       }
       if (!/(^|[\s;])done$/.test(text)) parseError ||= "The for loop has no done.";
       grouped.push({ cmd: text, connector: parts[i].connector });
@@ -108,6 +109,7 @@
     const words = commandWords(command);
     const name = words[0];
     if (name === "true" || name === "echo" || name === "printf" || name === "pwd") return true;
+    if (name === "test" || name === "[") return fileTestStatus(words, files);
     if (name === "find") {
       const r = Engine.runFind(files, command);
       return r.error ? null : !r.errors.length;
@@ -117,6 +119,36 @@
     const paths = words.slice(1).filter((w, i, all) => !w.startsWith("-") && !/^-[nc]$/.test(all[i - 1] || ""));
     try {
       return paths.every((p) => Engine.expand(tree, p).every((x) => tree.exists(x)));
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // `[ -e path ]` / `test -f path` and friends, as agents write before a guarded
+  // mv or cp. Only single file checks, optionally negated with `!`, on a plain
+  // path; anything else (globs, -a/-o, string tests) stays unknown.
+  function fileTestStatus(words, files) {
+    let args = words.slice(1);
+    if (words[0] === "[") {
+      if (args[args.length - 1] !== "]") return null;
+      args = args.slice(0, -1);
+    }
+    let negate = false;
+    if (args[0] === "!") { negate = true; args = args.slice(1); }
+    if (args.length !== 2 || !["-e", "-f", "-d", "-s"].includes(args[0])) return null;
+    const target = args[1];
+    if (/[*?[\]$`]/.test(target) || target.startsWith("/") || target.startsWith("~")) return null;
+    let path;
+    try {
+      const tree = new Engine.FileTree(files);
+      const hits = Engine.expand(tree, target);
+      if (hits.length !== 1) return null;
+      path = hits[0];
+      const ok = args[0] === "-d" ? tree.isDir(path)
+        : args[0] === "-f" ? tree.isFile(path)
+        : args[0] === "-s" ? tree.isFile(path) && (tree.files.get(path).size || 0) > 0
+        : tree.exists(path);
+      return negate ? !ok : ok;
     } catch (err) {
       return null;
     }
@@ -255,8 +287,11 @@
         continue;
       }
       if (conditional && priorSucceeded == null) {
-        blocked = true;
-        steps.push({ ...part, cls, skipped: true, skipReason: "the previous read-only command's exit status cannot be determined" });
+        // Whether a read-only step runs (e.g. `&& cmp a b && echo ok`) cannot
+        // change any file, so it does not block; a change here still does.
+        const harmless = cls.kind === "readonly";
+        if (!harmless) blocked = true;
+        steps.push({ ...part, cls, skipped: true, harmless, skipReason: "the previous read-only command's exit status cannot be determined" });
         continue;
       }
       if (stateUnknown) {
@@ -266,8 +301,9 @@
       }
       if (cls.kind === "readonly") {
         priorSucceeded = cls.alwaysSucceeds ? true : cls.pipeline ? null : readonlyStatus(stripNullRedirects(part.cmd), files);
-        // A read-only step that fails in the mock means the plan would not run as written.
-        if (priorSucceeded === false) blocked = true;
+        // A read-only step that fails in the mock means the plan would not run
+        // as written, except a [ ] / test condition, whose job is to be false.
+        if (priorSucceeded === false && cls.name !== "[" && cls.name !== "test") blocked = true;
         steps.push({ ...part, cls, success: priorSucceeded });
         continue;
       }
@@ -285,21 +321,44 @@
         let groups = null, reason = "", extraErrors = [];
         if (cls.name === "for") {
           const u = Engine.unrollFor(files, cmd);
-          if (u.error) reason = u.error; else groups = u.iterations;
+          if (u.error) reason = u.error;
+          else {
+            // Run the unrolled iterations as one ordinary sequence, so [ ]
+            // checks, || and read-only steps inside the body work as they do
+            // outside a loop. Iterations are separate lists, joined by ";".
+            const text = u.iterations.map((iter) => iter.map((s, k) => (k ? ` ${s.connector} ` : "") + s.cmd).join("")).join("; ");
+            const inner = simulateSequence(text, files);
+            const bad = inner.steps.find((s) => (s.r && s.r.blocked) || (!s.skipped && s.cls.kind === "changes")
+              || (s.skipped && !s.harmless && !/^the previous command (failed|succeeded)$/.test(s.skipReason)));
+            if (bad) reason = bad.r && bad.r.blocked ? `${bad.cmd}: ${bad.r.errors.join("; ")}` : `${bad.cmd} ${bad.cls.reason || bad.skipReason}`;
+            else {
+              const done = inner.steps.filter((s) => s.r);
+              r = {
+                effects: done.flatMap((s) => s.r.effects),
+                errors: done.flatMap((s) => s.r.errors),
+                notes: done.flatMap((s) => s.r.notes || []),
+                ran: inner.steps.filter((s) => !s.skipped).map((s) => s.cmd),
+                blocked: false,
+                after: new Engine.FileTree(inner.finalFiles),
+              };
+            }
+          }
         } else {
           const f = Engine.runFind(files, cmd);
           if (f.error) reason = f.error;
           else { groups = [f.commands.map((c) => ({ cmd: c, connector: ";" }))]; extraErrors = f.errors; }
         }
-        if (!groups) {
+        if (!groups && !r) {
           blocked = true;
           stateUnknown = true;
           priorSucceeded = null;
           steps.push({ ...part, cls: { kind: "changes", name: cls.name, reason: reason.replace(/^(find|for loop): /, "") }, success: null });
           continue;
         }
-        r = Engine.simulateMany(files, groups);
-        r.errors.push(...extraErrors);
+        if (!r) {
+          r = Engine.simulateMany(files, groups);
+          r.errors.push(...extraErrors);
+        }
       } else {
         r = Engine.simulate(files, cmd);
       }
