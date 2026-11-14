@@ -226,7 +226,10 @@ function reviewCommand(command, cwd, options = {}) {
     if (step.r && step.r.blocked) reasons.push(`\`${step.cmd}\`: ${step.r.errors.join("; ")}`);
     else if (step.r) { effects.push(...step.r.effects); errors.push(...step.r.errors.map(friendly)); }
     if (step.cls && step.cls.kind === "changes" && !step.skipped) reasons.push(`\`${step.cmd}\` ${step.cls.reason}`);
-    if (step.skipped && step.skipReason && !reasons.length) reasons.push(`\`${step.cmd}\` skipped: ${step.skipReason}`);
+    // Skipping the other branch of `&&` / `||` is normal control flow; only an
+    // unknown outcome means the preview may be wrong.
+    const normalSkip = /^the previous command (failed|succeeded)$/.test(step.skipReason || "");
+    if (step.skipped && step.skipReason && !normalSkip && !reasons.length) reasons.push(`\`${step.cmd}\` skipped: ${step.skipReason}`);
   }
   if (sim.parseError) reasons.push(sim.parseError);
   if (reasons.length && !effects.length) return fail(reasons.join("; "));

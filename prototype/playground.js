@@ -108,6 +108,7 @@
     const words = commandWords(command);
     const name = words[0];
     if (name === "true" || name === "echo" || name === "printf" || name === "pwd") return true;
+    if (name === "test" || name === "[") return fileTestStatus(words, files);
     if (name === "find") {
       const r = Engine.runFind(files, command);
       return r.error ? null : !r.errors.length;
@@ -117,6 +118,36 @@
     const paths = words.slice(1).filter((w, i, all) => !w.startsWith("-") && !/^-[nc]$/.test(all[i - 1] || ""));
     try {
       return paths.every((p) => Engine.expand(tree, p).every((x) => tree.exists(x)));
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // `[ -e path ]` / `test -f path` and friends, as agents write before a guarded
+  // mv or cp. Only single file checks, optionally negated with `!`, on a plain
+  // path; anything else (globs, -a/-o, string tests) stays unknown.
+  function fileTestStatus(words, files) {
+    let args = words.slice(1);
+    if (words[0] === "[") {
+      if (args[args.length - 1] !== "]") return null;
+      args = args.slice(0, -1);
+    }
+    let negate = false;
+    if (args[0] === "!") { negate = true; args = args.slice(1); }
+    if (args.length !== 2 || !["-e", "-f", "-d", "-s"].includes(args[0])) return null;
+    const target = args[1];
+    if (/[*?[\]$`]/.test(target) || target.startsWith("/") || target.startsWith("~")) return null;
+    let path;
+    try {
+      const tree = new Engine.FileTree(files);
+      const hits = Engine.expand(tree, target);
+      if (hits.length !== 1) return null;
+      path = hits[0];
+      const ok = args[0] === "-d" ? tree.isDir(path)
+        : args[0] === "-f" ? tree.isFile(path)
+        : args[0] === "-s" ? tree.isFile(path) && (tree.files.get(path).size || 0) > 0
+        : tree.exists(path);
+      return negate ? !ok : ok;
     } catch (err) {
       return null;
     }

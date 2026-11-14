@@ -95,6 +95,18 @@ test("asks with a warning when the command cannot be previewed", () => {
   assert.equal(strict.hookSpecificOutput.permissionDecision, "deny");
 });
 
+test("previews a guarded rename like the ones Claude writes", () => {
+  const dir = workspace({ "reports/report_v2.docx": "v2", "reports/report_v1.docx": "v1" });
+  const command = `cd ${dir}/reports && ls -la && [ -e report_final.docx ] && echo "TARGET EXISTS" || mv -n report_v2.docx report_final.docx && ls -la`;
+  const r = reviewCommand(command, os.homedir());
+  assert.equal(r.status, "preview");
+  assert.match(r.text, /report_v2\.docx -> report_final\.docx/);
+  assert.doesNotMatch(r.text, /Partly|Could not/);
+  // The target exists, so the mv branch never runs and nothing changes.
+  const taken = reviewCommand(`cd ${dir}/reports && [ -e report_v1.docx ] && echo exists || mv report_v2.docx report_v1.docx`, dir);
+  assert.equal(taken.effects.length, 0);
+});
+
 test("previews find -delete and for loops by expanding them", () => {
   const dir = workspace({ "a.tmp": "1", "sub/b.tmp": "2", "c.txt": "3" });
   const find = reviewCommand("find . -name '*.tmp' -delete", dir);
