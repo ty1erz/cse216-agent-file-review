@@ -78,6 +78,8 @@ test("handles a leading cd and absolute paths inside the folder", () => {
   const viaCd = reviewCommand(`cd ${dir}/proj && rm tmp/a.tmp`, os.homedir());
   assert.equal(viaCd.status, "preview");
   assert.match(viaCd.text, /tmp\/a\.tmp/);
+  const viaSemicolon = reviewCommand(`cd ${dir}/proj; rm tmp/a.tmp`, os.homedir());
+  assert.equal(viaSemicolon.status, "preview", viaSemicolon.text);
 
   const abs = reviewCommand(`rm "${dir}/proj/keep.txt"`, path.join(dir, "proj"));
   assert.equal(abs.status, "preview");

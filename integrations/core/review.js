@@ -59,9 +59,11 @@ function triggers(command, commands) {
   return commands.has("rm") && /(^|\s)-delete(\s|$)/.test(masked);
 }
 
-// A leading `cd DIR &&` (common in agent commands) moves the preview root.
+// A leading `cd DIR &&` or `cd DIR;` (common in agent commands) moves the
+// preview root. After `;` the rest runs even if cd fails, but DIR is the
+// agent's own working folder in practice, so both are treated alike.
 function splitLeadingCd(command, cwd) {
-  const m = command.match(/^\s*cd\s+("[^"]*"|'[^']*'|[^\s;&|]+)\s*&&\s*([\s\S]+)$/);
+  const m = command.match(/^\s*cd\s+("[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*([\s\S]+)$/);
   if (!m) return { command, cwd };
   let dir = m[1].replace(/^["']|["']$/g, "");
   if (dir === "~" || dir.startsWith("~/")) dir = path.join(os.homedir(), dir.slice(1));

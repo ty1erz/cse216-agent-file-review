@@ -255,7 +255,8 @@ node tests/stress/run_claude_code.js /tmp/fr-runs --jobs 6 --only delete,copy,mo
 
 The report lists commands the plugin could not preview and file-changing
 commands it does not review; reprint it with `--report`. In the last run (44
-requests, 156 commands), 26 of 32 reviewed commands previewed fully.
+requests, 161 commands), 33 of the 36 reviewed commands previewed fully and no
+command changed files without a review.
 
 ### Known limitations
 
