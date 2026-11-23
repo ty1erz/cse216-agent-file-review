@@ -44,7 +44,7 @@ Then open http://localhost:8216. Three modes:
   sees the mock file tree and proposes the shell commands an agent would run.
   The page distinguishes supported file changes, an explicit set of read-only
   commands, and commands it cannot preview. Supported changes are `rm`, `cp`,
-  `mv`, `mkdir`, `rmdir`, `tar -c` and `gzip` (with common flags such as `-r`,
+  `mv`, `mkdir`, `rmdir`, `tar -c`, `gzip` and `gunzip` (with common flags such as `-r`,
   `-n`, `-u`, `-a` and `-t DIR`), plus `find` with `-delete` or
   `-exec rm/mv/cp {}` and simple `for f in ...; do ...; done` loops, which are
   previewed as the exact commands they expand to. Read-only pipelines
@@ -141,8 +141,9 @@ approve. Deploy the web app with access for the intended participants and set
 ## Claude Code plugin
 
 `file-review` brings the file preview to Claude Code. Before Claude runs a Bash
-command that uses `rm`, `cp` or `mv`, the approval prompt lists every file the
-command would delete, overwrite, move or create:
+command that uses `rm`, `cp`, `mv`, `mkdir`, `rmdir`, `tar`, `gzip` or
+`gunzip`, the approval prompt lists every file the command would delete,
+overwrite, move, compress or create:
 
 ```text
 Bash command
@@ -206,7 +207,7 @@ Set these as environment variables before starting `claude`:
 
 | Variable | Effect |
 |---|---|
-| `FILE_REVIEW_COMMANDS` | Commands that trigger a review. Default `rm,cp,mv`; the engine also supports `mkdir`, `rmdir`, `tar` and `gzip`. |
+| `FILE_REVIEW_COMMANDS` | Commands that trigger a review. Default `rm,cp,mv,mkdir,rmdir,tar,gzip,gunzip`; set e.g. `rm,cp,mv` to review fewer. |
 | `FILE_REVIEW_STRICT=1` | Refuse reviewed commands that can't be previewed, so Claude rewrites them, instead of asking. |
 | `FILE_REVIEW_LOG=<file.jsonl>` | Append every Bash command and the plugin's decision to a file. |
 
@@ -222,12 +223,17 @@ Set these as environment variables before starting `claude`:
    folder (never their contents), runs `prototype/engine.js` on that list,
    and answers "ask" with the preview.
 4. If it cannot simulate the command faithfully, it still answers "ask", with
-   "Could not preview" and the reason. A reviewed command never runs without a
-   prompt.
+   "Could not preview" and the reason. When only part of a command could be
+   simulated, the prompt lists every later step under NOT PREVIEWED, marking
+   with `!` those that change files, so an `rm` at the end is never hidden. A
+   reviewed command never runs without a prompt.
 
 It also handles common agent habits: a leading `cd DIR &&`, absolute paths
 inside the folder, `~`, brace lists like `a{1,2}.pdf`, single-command
-`if …; then …; fi`, and read-only checks such as `&& cmp a b && echo OK`.
+`if …; then …; fi`, `\` line continuations, plain variables such as
+`B=/path; mv $B/x …`, dated names such as `backup-$(date +%Y%m%d).tgz`,
+`tar -C DIR` and `--exclude`, and read-only checks such as `&& cmp a b`,
+`tar -t` and `gzip -t`.
 Big folders such as `node_modules` and `.git` are only scanned when the
 command names them.
 
@@ -251,8 +257,11 @@ node tests/stress/run_claude_code.js /tmp/fr-runs --jobs 6 --only delete,copy,mo
 ```
 
 The report lists commands the plugin could not preview and file-changing
-commands it does not review; reprint it with `--report`. In the last run (44
-requests, 156 commands), 26 of 32 reviewed commands previewed fully.
+commands it does not review; reprint it with `--report`. Pass
+`--prompts tests/stress/prompts-edge.txt` for requests aimed at `mkdir`,
+`rmdir`, `tar` and `gzip`. In the last run (44
+requests, 161 commands), 33 of the 36 reviewed commands previewed fully and no
+command changed files without a review.
 
 ### Known limitations
 
@@ -260,10 +269,13 @@ These still ask with "Could not preview":
 
 - loop bodies with other expansions (`${f:11:10}`, `$(echo … | sed …)`)
 - `cd subdir && mv ../../x …`
-- `\` line continuations and variables such as `B=…; mv $B/…`
+- variables whose value is not plain text (`X=$(ls)`)
+- `cp -R dir/. dest` (copying a folder's contents)
 - `xargs` pipelines
+- `tar -x`, which can overwrite files the archive lists
 
-`tar`, `rmdir`, `rsync` and `git mv` are not reviewed by default.
+`rsync`, `zip`/`unzip`, `git mv` and the agent's own file-edit tools are not
+reviewed.
 
 ## Verify changes
 

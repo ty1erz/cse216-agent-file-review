@@ -1,0 +1,27 @@
+# Requests aimed at mkdir, rmdir, tar and gzip and at tricky combinations.
+# Same format as prompts.txt: one request per line, # starts a section.
+# mkdir
+Make a folder called archive
+Create folders for 2025 and 2026 under photos
+Set up a projects folder with src, docs and tests inside it
+# rmdir
+Delete the empty folders
+Remove the backup folder if it's empty
+Delete all empty folders anywhere in here
+# tar
+Archive the logs and delete the originals
+Make a tar.gz backup of the docs folder inside backup
+Bundle all the PDFs into one archive
+Archive the config folder, then delete it
+Back up everything except build into a single archive
+# gzip
+Compress the old log files in logs
+Compress the big files in Downloads but keep the originals
+Compress server-2026-10-23.log
+# combined
+Clean up build: delete the source map and compress app.js
+Move the invoices into finance/2026 and remove Downloads if it ends up empty
+Replace backup with a fresh copy of the config folder
+Create a dated backup folder and copy my thesis into it
+Organize Downloads into pdfs and installers folders
+Archive last week's logs, then compress whatever is left in logs

@@ -104,12 +104,13 @@
 
   // Exit status of a read-only command in the mock: listing or reading paths
   // succeeds exactly when they exist. Unknown for anything else.
-  const PATH_READERS = new Set(["ls", "cat", "stat", "du", "wc", "head", "tail", "file", "tree"]);
+  const PATH_READERS = new Set(["ls", "cat", "stat", "du", "wc", "head", "tail", "file", "tree", "gzip", "gunzip"]);
   function readonlyStatus(command, files) {
     const words = commandWords(command);
     const name = words[0];
     if (name === "true" || name === "echo" || name === "printf" || name === "pwd") return true;
     if (name === "test" || name === "[") return fileTestStatus(words, files);
+    if (name === "tar") return tarListStatus(words, files);
     if (name === "find") {
       const r = Engine.runFind(files, command);
       return r.error ? null : !r.errors.length;
@@ -119,6 +120,25 @@
     const paths = words.slice(1).filter((w, i, all) => !w.startsWith("-") && !/^-[nc]$/.test(all[i - 1] || ""));
     try {
       return paths.every((p) => Engine.expand(tree, p).every((x) => tree.exists(x)));
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // `tar -tzvf ARCHIVE`, which agents run to check an archive they just made,
+  // succeeds when ARCHIVE is a file (including one created earlier in the same
+  // command). Anything else about tar stays unknown.
+  function tarListStatus(words, files) {
+    const bundle = (words[1] || "").replace(/^-/, "");
+    if (!/^[tzjJvf]+$/.test(bundle) || !bundle.includes("t")) return null;
+    let archive = null;
+    if (bundle.endsWith("f")) archive = words[2];
+    else { const i = words.indexOf("-f"); if (i > 1) archive = words[i + 1]; }
+    if (!archive || /[*?[\]$`]/.test(archive) || archive.startsWith("/") || archive.startsWith("~")) return null;
+    try {
+      const tree = new Engine.FileTree(files);
+      const hits = Engine.expand(tree, archive);
+      return hits.length === 1 && tree.isFile(hits[0]);
     } catch (err) {
       return null;
     }
@@ -158,7 +178,7 @@
     return parseCommandSequence(line).map((part) => part.cmd);
   }
 
-  const PREVIEWABLE = new Set(["rm", "cp", "mv", "mkdir", "rmdir", "tar", "gzip"]);
+  const PREVIEWABLE = new Set(["rm", "cp", "mv", "mkdir", "rmdir", "tar", "gzip", "gunzip"]);
   const READ_ONLY = new Set(["ls", "pwd", "cat", "head", "tail", "stat", "file", "du", "wc", "grep", "rg", "echo", "printf", "true",
     "sort", "uniq", "cut", "tr", "tree", "basename", "dirname", "date", "which", "realpath", "readlink",
     "shasum", "sha256sum", "md5", "md5sum", "cmp", "diff", "test", "["]);
@@ -254,6 +274,10 @@
     }
     if (name.includes("/") || /^\w+=/.test(name) || ["sudo", "env", "command", "time", "nohup"].includes(name)) {
       return { kind: "changes", name, reason: "uses a wrapper or executable form this prototype does not simulate" };
+    }
+    // gzip -t only tests that a compressed file is intact.
+    if ((name === "gzip" || name === "gunzip") && words.slice(1).some((w) => /^-[a-z0-9]*t/.test(w))) {
+      return { kind: "readonly", name, alwaysSucceeds: false };
     }
     if (PREVIEWABLE.has(name)) return { kind: "previewable", name };
     if (READ_ONLY.has(name)) {

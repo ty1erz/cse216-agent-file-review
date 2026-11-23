@@ -3,7 +3,7 @@
 // each in a fresh demo folder with the plugin loaded, and record every Bash
 // command it tries and what the plugin did with it.
 //
-//   node tests/stress/run_claude_code.js <out-dir> [--jobs 4] [--only delete,copy] [--model sonnet]
+//   node tests/stress/run_claude_code.js <out-dir> [--jobs 4] [--only delete,copy] [--model sonnet] [--prompts file.txt]
 //
 // Headless (-p) runs cannot answer the plugin's "ask", so reviewed commands are
 // refused and the demo folders stay unchanged; read-only commands still run.
@@ -19,10 +19,10 @@ const path = require("node:path");
 const ROOT = path.resolve(__dirname, "../..");
 const { build } = require(path.join(ROOT, "integrations/claude-code/demo.js"));
 
-function readPrompts(only) {
+function readPrompts(only, file = path.join(__dirname, "prompts.txt")) {
   const out = [];
   let section = "";
-  for (const line of fs.readFileSync(path.join(__dirname, "prompts.txt"), "utf8").split("\n")) {
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
     const text = line.trim();
     if (!text) continue;
     if (text.startsWith("#")) { section = text.slice(1).trim().split(/\s+/)[0]; continue; }
@@ -92,7 +92,7 @@ async function main() {
   if (argv.includes("--report")) return report(outDir);
   const jobs = Number(flag("--jobs") || 4);
   const only = flag("--only") ? flag("--only").split(",") : null;
-  const items = readPrompts(only);
+  const items = readPrompts(only, flag("--prompts") ? path.resolve(flag("--prompts")) : undefined);
   fs.mkdirSync(outDir, { recursive: true });
   let next = 0;
   await Promise.all(Array.from({ length: jobs }, async () => {

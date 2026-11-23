@@ -260,3 +260,28 @@ test("backslash-escaped spaces and ~/ paths resolve like Bash", () => {
 
   assert.equal(Engine.simulate(files, "rm ~other/file.txt").blocked, true);
 });
+
+test("tar -C reads the names inside the folder but writes the archive where named", () => {
+  const Engine = loadContext().window.Engine;
+  const files = [{ path: "logs/a.log", size: 10 }, { path: "logs/b.log", size: 5 }, { path: "backup/" }];
+  const r = Engine.simulate(files, "tar -czf backup/logs.tgz -C logs a.log b.log");
+  assert.equal(r.blocked, false, r.errors.join(" "));
+  assert.deepEqual(effectPaths(r, "create"), ["backup/logs.tgz"]);
+  assert.equal(r.effects[0].after.size, 15);
+  assert.equal(Engine.simulate(files, "tar -czf backup/x.tgz -C logs missing.log").errors.length, 1);
+  assert.equal(Engine.simulate(files, "tar -czf backup/x.tgz -C").blocked, true);
+});
+
+test("gzip -d and gunzip replace FILE.gz with FILE", () => {
+  const Engine = loadContext().window.Engine;
+  const files = [{ path: "a.log.gz", size: 3 }, { path: "b.log.gz", size: 4 }, { path: "b.log", size: 9 }, { path: "c.txt", size: 1 }];
+  const d = Engine.simulate(files, "gunzip a.log.gz");
+  assert.equal(d.blocked, false);
+  assert.equal(JSON.stringify(d.effects.map((e) => [e.type, e.from, e.path])), JSON.stringify([["move", "a.log.gz", "a.log"]]));
+  assert.equal(Engine.simulate(files, "gzip -d a.log.gz").effects[0].path, "a.log");
+  assert.equal(Engine.simulate(files, "gunzip -k a.log.gz").effects[0].type, "create");
+  // Existing target is kept unless -f; files without .gz are ignored.
+  assert.equal(Engine.simulate(files, "gunzip b.log.gz").effects.length, 0);
+  assert.equal(Engine.simulate(files, "gunzip -f b.log.gz").effects[0].before.size, 9);
+  assert.match(Engine.simulate(files, "gunzip c.txt").errors[0], /unknown suffix/);
+});

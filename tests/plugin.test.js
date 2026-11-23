@@ -39,9 +39,9 @@ function listing(dir) {
 
 const bash = (command, cwd) => ({ tool_name: "Bash", tool_input: { command }, cwd });
 
-test("ignores commands that are not rm, cp or mv", () => {
+test("ignores commands that do not change files through a reviewed command", () => {
   const dir = workspace({ "a.txt": "a" });
-  for (const command of ["ls -la", "git mv a.txt b.txt", 'echo "rm -rf a.txt"', "npm run rm", "mkdir out", 'git commit -m "mv files"']) {
+  for (const command of ["ls -la", "git mv a.txt b.txt", 'echo "rm -rf a.txt"', "npm run rm", 'git commit -m "mv files"', 'echo "tar -czf x.tgz ."']) {
     assert.equal(reviewCommand(command, dir).status, "skip", command);
     assert.equal(decide(bash(command, dir)), null, command);
   }
@@ -78,6 +78,8 @@ test("handles a leading cd and absolute paths inside the folder", () => {
   const viaCd = reviewCommand(`cd ${dir}/proj && rm tmp/a.tmp`, os.homedir());
   assert.equal(viaCd.status, "preview");
   assert.match(viaCd.text, /tmp\/a\.tmp/);
+  const viaSemicolon = reviewCommand(`cd ${dir}/proj; rm tmp/a.tmp`, os.homedir());
+  assert.equal(viaSemicolon.status, "preview", viaSemicolon.text);
 
   const abs = reviewCommand(`rm "${dir}/proj/keep.txt"`, path.join(dir, "proj"));
   assert.equal(abs.status, "preview");
@@ -120,7 +122,8 @@ test("previews find -delete and for loops by expanding them", () => {
 
 test("FILE_REVIEW_COMMANDS widens or narrows what is reviewed", () => {
   const dir = workspace({ "a.txt": "a" });
-  assert.equal(reviewCommand("mkdir out", dir, { env: { FILE_REVIEW_COMMANDS: "rm,cp,mv,mkdir" } }).status, "preview");
+  assert.equal(reviewCommand("tar -czf a.tgz a.txt", dir).status, "preview");
+  assert.equal(reviewCommand("tar -czf a.tgz a.txt", dir, { env: { FILE_REVIEW_COMMANDS: "rm,cp,mv" } }).status, "skip");
   assert.equal(reviewCommand("cp a.txt b.txt", dir, { env: { FILE_REVIEW_COMMANDS: "rm" } }).status, "skip");
 });
 
@@ -206,4 +209,109 @@ test("common agent habits are understood", () => {
   assert.equal(reviewCommand("if [ -d build ]; then rm -r build; else echo no; fi", dir).status, "unpreviewable");
   assert.equal(reviewCommand("rm logs/{a..b}.log", dir).status, "unpreviewable");
   assert.equal(reviewCommand('rm "logs/{a,b}.log"', dir).effects.length, 0);
+});
+
+test("reviews mkdir, rmdir, tar and gzip by default", () => {
+  const dir = workspace({ "logs/a.log": "1".repeat(100), "logs/b.log": "2", "empty/": "", "out/": "" });
+  const ask = (command) => decide(bash(command, dir));
+
+  // A bare mkdir is previewed too, so the user sees the plugin at work.
+  assert.match(ask("mkdir -p archive/2026").hookSpecificOutput.permissionDecisionReason, /NEW FOLDER 2 folders/);
+  // mkdir together with a change is previewed as one step.
+  assert.match(ask("mkdir -p archive && mv logs/*.log archive/").hookSpecificOutput.permissionDecisionReason, /MOVE 2 files[\s\S]*NEW FOLDER 1 folder/);
+
+  assert.match(ask("rmdir empty").hookSpecificOutput.permissionDecisionReason, /DELETE 1 folder/);
+  assert.match(ask("gzip logs/a.log").hookSpecificOutput.permissionDecisionReason, /COMPRESS 1 file[\s\S]*logs\/a\.log -> logs\/a\.log\.gz/);
+  assert.match(ask("gzip -k logs/b.log").hookSpecificOutput.permissionDecisionReason, /CREATE 1 file/);
+
+  // tar -C reads the names from inside the folder; the archive path is not.
+  const tarC = ask("tar -czf out/logs.tgz -C logs a.log b.log").hookSpecificOutput.permissionDecisionReason;
+  assert.match(tarC, /\+ out\/logs\.tgz {2}\(from logs\/a\.log logs\/b\.log\)/);
+  // Listing an archive changes nothing; extracting cannot be previewed but still asks.
+  assert.equal(ask("tar -tzf out/logs.tgz"), null);
+  assert.match(ask("tar -xzf out/logs.tgz").hookSpecificOutput.permissionDecisionReason, /Could not preview/);
+});
+
+test("line continuations and plain variables are understood", () => {
+  const dir = workspace({ "photos/IMG_1.jpg": "x", "finance/2026/inv_1.pdf": "y" });
+  const cont = reviewCommand("mkdir -p photos/2025 \\\n  && mv -n photos/IMG_1.jpg photos/2025/", dir);
+  assert.equal(cont.status, "preview", cont.text);
+  assert.match(cont.text, /photos\/IMG_1\.jpg -> photos\/2025\/IMG_1\.jpg/);
+
+  const vars = reviewCommand(`B=${dir}; F=$B/finance/2026; mkdir -p "$F/01" && mv -n $F/inv_1.pdf \${F}/01/`, dir);
+  assert.equal(vars.status, "preview", vars.text);
+  assert.match(vars.text, /finance\/2026\/inv_1\.pdf -> finance\/2026\/01\/inv_1\.pdf/);
+
+  // Not plain assignments: left alone, so they still ask instead of guessing.
+  assert.equal(reviewCommand("X=$(ls); rm $X", dir).status, "unpreviewable");
+  assert.equal(reviewCommand("X=a b; rm $X", dir).status, "unpreviewable");
+  // A $NAME inside single quotes is literal text, not the variable.
+  assert.equal(reviewCommand("X=photos; rm '$X'", dir).effects.length, 0);
+});
+
+test("a partial preview lists every later step, so an rm is never hidden", () => {
+  const dir = workspace({ "logs/a.log": "1", "logs/b.log": "2", "backup/": "" });
+  // Archive, list it, verify in a temp folder, then delete the originals:
+  // the shape Claude used when asked to "archive the logs and delete the originals".
+  const command = 'tar -czf backup/logs.tgz -C logs a.log b.log && tar -tzvf backup/logs.tgz && mkdir -p "$TMPDIR/v_$$" '
+    + '&& tar -xzf backup/logs.tgz -C "$TMPDIR/v_$$" && echo OK && rm -rf "$TMPDIR/v_$$" && rm logs/*.log';
+  const out = decide(bash(command, dir));
+  const text = out.hookSpecificOutput.permissionDecisionReason;
+  assert.equal(out.hookSpecificOutput.permissionDecision, "ask");
+  assert.match(text, /CREATE 1 file/);
+  assert.match(text, /NOT PREVIEWED 4 steps/);
+  assert.match(text, /! rm logs\/\*\.log/);
+  // Read-only steps (tar -t, echo) are not listed as unpreviewed.
+  assert.doesNotMatch(text, /tar -tzvf|echo OK/);
+
+  // When nothing could be simulated, later destructive steps are listed too.
+  const none = decide(bash('mkdir -p "$TMPDIR/x" && rm logs/a.log', dir)).hookSpecificOutput.permissionDecisionReason;
+  assert.match(none, /Could not preview/);
+  assert.match(none, /! rm logs\/a\.log/);
+});
+
+test("gunzip is reviewed and shown as decompressing", () => {
+  const dir = workspace({ "logs/a.log.gz": "z" });
+  const text = decide(bash("gunzip logs/a.log.gz", dir)).hookSpecificOutput.permissionDecisionReason;
+  assert.match(text, /DECOMPRESS 1 file[\s\S]*logs\/a\.log\.gz -> logs\/a\.log/);
+});
+
+test("dated names, tar --exclude and gzip -t checks are previewed", () => {
+  const dir = workspace({ "docs/a.md": "a", "build/x.js": "x", "logs/a.log": "1", "backup/": "" });
+  const now = new Date();
+  const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+
+  const dated = reviewCommand("tar -czf backup/docs-$(date +%Y%m%d).tar.gz docs", dir);
+  assert.equal(dated.status, "preview", dated.text);
+  assert.match(dated.text, new RegExp(`backup/docs-${ymd}\\.tar\\.gz`));
+  const viaVar = reviewCommand("ts=$(date +%F) && cp docs/a.md \"backup/a-$ts.md\"", dir);
+  assert.equal(viaVar.status, "preview", viaVar.text);
+  // Formats we cannot reproduce, and $(date) inside single quotes, are left alone.
+  assert.equal(reviewCommand("cp docs/a.md backup/a-$(date +%A).md", dir).status, "unpreviewable");
+
+  const excl = reviewCommand("tar -czf backup/all.tgz --exclude=./build --exclude backup .", dir);
+  assert.equal(excl.status, "preview", excl.text);
+  assert.match(excl.text, /\+ backup\/all\.tgz/);
+
+  const checked = reviewCommand("gzip -k logs/a.log && gzip -t logs/a.log.gz && rm logs/a.log", dir);
+  assert.equal(checked.status, "preview", checked.text);
+  assert.match(checked.text, /DELETE 1 file/);
+  assert.match(checked.text, /CREATE 1 file/);
+});
+
+test("quoted variable values are read, not mistaken for empty", () => {
+  const dir = workspace({ "docs/a.md": "a", "backup/": "" });
+  const now = new Date();
+  const ymd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  // The exact shape Claude used for "make a dated tar.gz backup of docs".
+  const r = reviewCommand('f="backup/docs-$(date +%Y-%m-%d).tar.gz" && tar -czf "$f" docs && ls -l "$f" && tar -tzf "$f"', dir);
+  assert.equal(r.status, "preview", r.text);
+  assert.match(r.text, new RegExp(`\\+ backup/docs-${ymd}\\.tar\\.gz`));
+  assert.equal(reviewCommand("f='backup/x.tgz'; tar -czf $f docs", dir).status, "preview");
+  // Values that are empty, contain spaces or expand something are not guessed.
+  for (const command of ['f= && rm "$f"', 'f="a b.tgz" && tar -czf "$f" docs', 'f="$HOME/x" && rm "$f"']) {
+    const out = reviewCommand(command, dir);
+    assert.equal(out.status, "unpreviewable", command);
+    assert.doesNotMatch(out.text, /Empty paths/, command);
+  }
 });

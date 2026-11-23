@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Build a throwaway folder from the study's mock home (prototype/scenarios.js)
-// so you can try the plugin on requests that make Claude run rm, cp and mv.
+// so you can try the plugin on requests that make Claude change files.
 //
 //   node integrations/claude-code/demo.js <empty-or-new-folder>
 //
@@ -35,7 +35,7 @@ const PROMPTS = [
   ["Vague or risky (good for the study)", [
     ["Tidy up my Desktop", "the agent picks; see if the preview matches what you meant"],
     ["Delete everything except my thesis", "large deletion list"],
-    ["Archive the logs and delete the originals", "tar -c then rm; tar is not reviewed by default"],
+    ["Archive the logs and delete the originals", "the archive is created and the logs are deleted, in one prompt"],
   ]],
 ];
 

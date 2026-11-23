@@ -502,8 +502,9 @@
     const name = baseName(parsed.tokens[0].value);
     if (name === "tar") return simulateTar(tree, parsed.tokens.slice(1));
     if (name === "gzip") return simulateGzip(tree, parsed.tokens.slice(1));
+    if (name === "gunzip") return simulateGzip(tree, parsed.tokens.slice(1), true);
     if (!OPTION_SPECS[name]) {
-      return result(tree, name, [], [`This prototype only previews rm, cp, mv, mkdir, rmdir and tar -c (got "${name}")`], true);
+      return result(tree, name, [], [`This prototype only previews rm, cp, mv, mkdir, rmdir, tar -c, gzip and gunzip (got "${name}")`], true);
     }
     const options = parseArgs(name, parsed.tokens.slice(1));
     if (options.error) return result(tree, name, [], [options.error], true);
@@ -779,9 +780,20 @@
     let letters = "";
     let archive = null;
     const operands = [];
+    // -C DIR: names after it are read from inside DIR (the archive path is not).
+    let dir = null;
     for (let i = 0; i < tokens.length; i++) {
       const v = tokens[i].value;
       const isFirstBundle = i === 0 && /^[cxtrudzjJvf]+$/.test(v);
+      if (v === "-C") {
+        dir = tokens[++i];
+        if (!dir) return block("tar: -C needs a folder");
+        continue;
+      }
+      // --exclude only changes what goes into the archive, not which files
+      // change; the estimated size may include excluded files.
+      if (v.startsWith("--exclude=")) continue;
+      if (v === "--exclude") { i++; continue; }
       if (v.startsWith("--")) return block(`tar: unsupported option ${v}`);
       if (v.startsWith("-") || isFirstBundle) {
         const bundle = v.replace(/^-/, "");
@@ -796,7 +808,9 @@
         }
         continue;
       }
-      operands.push(tokens[i]);
+      operands.push(dir
+        ? { value: dir.value + "/" + tokens[i].value, unquoted: [...dir.unquoted, false, ...tokens[i].unquoted] }
+        : tokens[i]);
     }
     if (!letters.includes("c")) return block("tar: only creating archives (-c) can be previewed");
     if (!archive) return block("tar: -f ARCHIVE is required in this prototype");
@@ -829,37 +843,42 @@
 
   // gzip FILE replaces FILE with FILE.gz (-k keeps the original). The
   // compressed size is unknown, so the new file keeps the original's size.
-  function simulateGzip(tree, tokens) {
-    const block = (message) => result(tree, "gzip", [], [message], true);
+  // gzip -d / gunzip FILE.gz does the reverse and replaces FILE.gz with FILE.
+  function simulateGzip(tree, tokens, gunzip = false) {
+    const name = gunzip ? "gunzip" : "gzip";
+    const block = (message) => result(tree, name, [], [message], true);
     const flags = new Set();
     const operands = [];
     for (const token of tokens) {
       if (token.value.startsWith("-") && token.value !== "-") {
         for (const c of token.value.slice(1)) {
-          if (!/[kvf1-9]/.test(c)) return block(`gzip: unsupported option -${c}`);
+          if (!/[kvf1-9d]/.test(c)) return block(`${name}: unsupported option -${c}`);
           flags.add(c);
         }
       } else operands.push(token);
     }
-    if (!operands.length) return block("gzip: compressing standard input is outside the supported subset");
+    if (!operands.length) return block(`${name}: standard input is outside the supported subset`);
+    const decompress = gunzip || flags.has("d");
     const effects = [], errors = [];
     for (const operand of operands) {
       const expanded = expandToken(tree, operand);
       if (expanded.error) return block(expanded.error);
       for (const path of expanded.paths) {
-        if (tree.isDir(path)) { errors.push(`gzip: ${path} is a folder (skipped)`); continue; }
-        if (!tree.isFile(path)) { errors.push(`gzip: ${path}: no such file`); continue; }
-        if (path.endsWith(".gz")) { errors.push(`gzip: ${path} already has .gz suffix (unchanged)`); continue; }
-        const target = path + ".gz";
+        if (tree.isDir(path)) { errors.push(`${name}: ${path} is a folder (skipped)`); continue; }
+        if (!tree.isFile(path)) { errors.push(`${name}: ${path}: no such file`); continue; }
+        if (decompress && !path.endsWith(".gz")) { errors.push(`${name}: ${path}: unknown suffix (ignored)`); continue; }
+        if (!decompress && path.endsWith(".gz")) { errors.push(`gzip: ${path} already has .gz suffix (unchanged)`); continue; }
+        const target = decompress ? path.slice(0, -3) : path + ".gz";
+        if (tree.isDir(target)) { errors.push(`${name}: ${target} is a folder (unchanged)`); continue; }
         const before = tree.files.get(target);
-        if (before && !flags.has("f")) { errors.push(`gzip: ${target} already exists (unchanged)`); continue; }
-        const after = { ...tree.files.get(path), note: "compressed, size estimated" };
+        if (before && !flags.has("f")) { errors.push(`${name}: ${target} already exists (unchanged)`); continue; }
+        const after = { ...tree.files.get(path), note: decompress ? "decompressed, size estimated" : "compressed, size estimated" };
         effects.push(flags.has("k")
           ? { type: before ? "overwrite" : "create", kind: "file", from: path, path: target, before, after }
           : { type: "move", kind: "file", from: path, path: target, before, after });
       }
     }
-    return result(tree, "gzip", effects, errors, false, ["Compressed sizes are estimated; gzip's real output is smaller."]);
+    return result(tree, name, effects, errors, false, [decompress ? "Decompressed sizes are estimated." : "Compressed sizes are estimated; gzip's real output is smaller."]);
   }
 
   // ---------- find ----------

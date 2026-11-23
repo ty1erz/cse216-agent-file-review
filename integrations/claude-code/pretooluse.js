@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Claude Code PreToolUse hook for the Bash tool. When a command runs rm, cp or
-// mv (configurable with FILE_REVIEW_COMMANDS), it replaces the plain approval
-// prompt with one that lists every file the command would change. Commands we
-// don't review produce no output, so Claude Code's normal permissions apply.
+// Claude Code PreToolUse hook for the Bash tool. When a command runs rm, cp,
+// mv, mkdir, rmdir, tar, gzip or gunzip (configurable with FILE_REVIEW_COMMANDS), it
+// replaces the plain approval prompt with one that lists every file the
+// command would change. Commands we don't review produce no output, so
+// Claude Code's normal permissions apply.
 
 "use strict";
 
