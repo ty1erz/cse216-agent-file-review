@@ -215,9 +215,8 @@ test("reviews mkdir, rmdir, tar and gzip by default", () => {
   const dir = workspace({ "logs/a.log": "1".repeat(100), "logs/b.log": "2", "empty/": "", "out/": "" });
   const ask = (command) => decide(bash(command, dir));
 
-  // A bare mkdir only adds empty folders, so it gets no extra prompt.
-  assert.equal(reviewCommand("mkdir -p archive/2026", dir).status, "preview");
-  assert.equal(ask("mkdir -p archive/2026"), null);
+  // A bare mkdir is previewed too, so the user sees the plugin at work.
+  assert.match(ask("mkdir -p archive/2026").hookSpecificOutput.permissionDecisionReason, /NEW FOLDER 2 folders/);
   // mkdir together with a change is previewed as one step.
   assert.match(ask("mkdir -p archive && mv logs/*.log archive/").hookSpecificOutput.permissionDecisionReason, /MOVE 2 files[\s\S]*NEW FOLDER 1 folder/);
 
@@ -269,4 +268,33 @@ test("a partial preview lists every later step, so an rm is never hidden", () =>
   const none = decide(bash('mkdir -p "$TMPDIR/x" && rm logs/a.log', dir)).hookSpecificOutput.permissionDecisionReason;
   assert.match(none, /Could not preview/);
   assert.match(none, /! rm logs\/a\.log/);
+});
+
+test("gunzip is reviewed and shown as decompressing", () => {
+  const dir = workspace({ "logs/a.log.gz": "z" });
+  const text = decide(bash("gunzip logs/a.log.gz", dir)).hookSpecificOutput.permissionDecisionReason;
+  assert.match(text, /DECOMPRESS 1 file[\s\S]*logs\/a\.log\.gz -> logs\/a\.log/);
+});
+
+test("dated names, tar --exclude and gzip -t checks are previewed", () => {
+  const dir = workspace({ "docs/a.md": "a", "build/x.js": "x", "logs/a.log": "1", "backup/": "" });
+  const now = new Date();
+  const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+
+  const dated = reviewCommand("tar -czf backup/docs-$(date +%Y%m%d).tar.gz docs", dir);
+  assert.equal(dated.status, "preview", dated.text);
+  assert.match(dated.text, new RegExp(`backup/docs-${ymd}\\.tar\\.gz`));
+  const viaVar = reviewCommand("ts=$(date +%F) && cp docs/a.md \"backup/a-$ts.md\"", dir);
+  assert.equal(viaVar.status, "preview", viaVar.text);
+  // Formats we cannot reproduce, and $(date) inside single quotes, are left alone.
+  assert.equal(reviewCommand("cp docs/a.md backup/a-$(date +%A).md", dir).status, "unpreviewable");
+
+  const excl = reviewCommand("tar -czf backup/all.tgz --exclude=./build --exclude backup .", dir);
+  assert.equal(excl.status, "preview", excl.text);
+  assert.match(excl.text, /\+ backup\/all\.tgz/);
+
+  const checked = reviewCommand("gzip -k logs/a.log && gzip -t logs/a.log.gz && rm logs/a.log", dir);
+  assert.equal(checked.status, "preview", checked.text);
+  assert.match(checked.text, /DELETE 1 file/);
+  assert.match(checked.text, /CREATE 1 file/);
 });

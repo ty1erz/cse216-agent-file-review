@@ -104,7 +104,7 @@
 
   // Exit status of a read-only command in the mock: listing or reading paths
   // succeeds exactly when they exist. Unknown for anything else.
-  const PATH_READERS = new Set(["ls", "cat", "stat", "du", "wc", "head", "tail", "file", "tree"]);
+  const PATH_READERS = new Set(["ls", "cat", "stat", "du", "wc", "head", "tail", "file", "tree", "gzip", "gunzip"]);
   function readonlyStatus(command, files) {
     const words = commandWords(command);
     const name = words[0];
@@ -178,7 +178,7 @@
     return parseCommandSequence(line).map((part) => part.cmd);
   }
 
-  const PREVIEWABLE = new Set(["rm", "cp", "mv", "mkdir", "rmdir", "tar", "gzip"]);
+  const PREVIEWABLE = new Set(["rm", "cp", "mv", "mkdir", "rmdir", "tar", "gzip", "gunzip"]);
   const READ_ONLY = new Set(["ls", "pwd", "cat", "head", "tail", "stat", "file", "du", "wc", "grep", "rg", "echo", "printf", "true",
     "sort", "uniq", "cut", "tr", "tree", "basename", "dirname", "date", "which", "realpath", "readlink",
     "shasum", "sha256sum", "md5", "md5sum", "cmp", "diff", "test", "["]);
@@ -274,6 +274,10 @@
     }
     if (name.includes("/") || /^\w+=/.test(name) || ["sudo", "env", "command", "time", "nohup"].includes(name)) {
       return { kind: "changes", name, reason: "uses a wrapper or executable form this prototype does not simulate" };
+    }
+    // gzip -t only tests that a compressed file is intact.
+    if ((name === "gzip" || name === "gunzip") && words.slice(1).some((w) => /^-[a-z0-9]*t/.test(w))) {
+      return { kind: "readonly", name, alwaysSucceeds: false };
     }
     if (PREVIEWABLE.has(name)) return { kind: "previewable", name };
     if (READ_ONLY.has(name)) {

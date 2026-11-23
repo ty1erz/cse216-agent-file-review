@@ -17,8 +17,8 @@ const ROOT = path.resolve(__dirname, "..", "..");
 
 // Commands that trigger a review: every command the simulator models.
 // FILE_REVIEW_COMMANDS can narrow it (e.g. "rm,cp,mv").
-const DEFAULT_COMMANDS = ["rm", "cp", "mv", "mkdir", "rmdir", "tar", "gzip"];
-const ENGINE_COMMANDS = new Set(["rm", "cp", "mv", "mkdir", "rmdir", "tar", "gzip"]);
+const DEFAULT_COMMANDS = ["rm", "cp", "mv", "mkdir", "rmdir", "tar", "gzip", "gunzip"];
+const ENGINE_COMMANDS = new Set(DEFAULT_COMMANDS);
 
 // Folders that are usually huge and rarely the target. They are only scanned
 // when the command names them; otherwise they are kept as opaque entries.
@@ -104,7 +104,7 @@ function relativize(command, root, home = os.homedir()) {
 // maskQuoted() keeps every character in place, so match positions found in
 // the masked text apply to the original.
 function normalizeHabits(command, maskQuoted) {
-  let out = inlineVariables(command.replace(/\\\r?\n[ \t]*/g, " "), maskQuoted);
+  let out = inlineVariables(inlineDates(command.replace(/\\\r?\n[ \t]*/g, " "), maskQuoted), maskQuoted);
   for (;;) {
     const m = maskQuoted(out).text.match(/\s*(?:&&|;)\s*cd(?:\s+[^\s;&|]+)?\s*;?\s*$/);
     if (!m) break;
@@ -119,6 +119,35 @@ function normalizeHabits(command, maskQuoted) {
     out = out.slice(0, start) + `${cond} && ${body}` + out.slice(end);
   }
   return expandBraces(out, maskQuoted);
+}
+
+// `$(date +%Y%m%d)` and similar become the current date, so a dated file name
+// in the preview matches what the command will create (to the second).
+const DATE_CODES = { Y: (d) => d.getFullYear(), y: (d) => String(d.getFullYear()).slice(-2), m: (d) => d.getMonth() + 1, d: (d) => d.getDate(),
+  H: (d) => d.getHours(), M: (d) => d.getMinutes(), S: (d) => d.getSeconds(), s: (d) => Math.floor(d / 1000), "%": () => "%" };
+function formatDate(fmt, now) {
+  const pad = (v, code) => (code === "Y" || code === "s" || code === "%" ? String(v) : String(v).padStart(2, "0"));
+  const expanded = fmt.replace(/%F/g, "%Y-%m-%d").replace(/%T/g, "%H:%M:%S");
+  if (/%[^YymdHMSs%]/.test(expanded)) return null;
+  return expanded.replace(/%([YymdHMSs%])/g, (_, code) => pad(DATE_CODES[code](now), code));
+}
+function inlineDates(command, maskQuoted, now = new Date()) {
+  let out = command;
+  for (let guard = 0; guard < 10; guard++) {
+    const masked = maskQuoted(out).text;
+    const re = /\$\(\s*date\s+(['"]?)\+([^'"()\s]+)\1\s*\)/g;
+    let m, done = true;
+    while ((m = re.exec(out))) {
+      if (masked[m.index] !== "$") continue;
+      const value = formatDate(m[2], now);
+      if (value == null || /[^\w.:-]/.test(value)) continue;
+      out = out.slice(0, m.index) + value + out.slice(m.index + m[0].length);
+      done = false;
+      break;
+    }
+    if (done) break;
+  }
+  return out;
 }
 
 // `B=/x/y; F=$B/z; mv $F/a ...` becomes `mv /x/y/z/a ...`. Only plain values
@@ -257,9 +286,11 @@ function render(effects, { opaque = [] } = {}) {
     lines.push(`OVERWRITE ${plural(overwritten.length, "file")} — old contents are lost`);
     lines.push(...listLines(overwritten, (e) => `  ! ${e.path}  (${humanSize(e.before.size)}, replaced by ${e.from})`));
   }
-  // gzip replaces x with x.gz: a move in the simulator, a compression to the user.
+  // gzip replaces x with x.gz and gunzip the reverse: a move in the
+  // simulator, a compression to the user.
   const compressed = moved.filter((e) => !e.before && e.path === e.from + ".gz");
-  const plainMoves = moved.filter((e) => !e.before && !compressed.includes(e));
+  const decompressed = moved.filter((e) => !e.before && e.from === e.path + ".gz");
+  const plainMoves = moved.filter((e) => !e.before && !compressed.includes(e) && !decompressed.includes(e));
   if (plainMoves.length || movedDirs.length) {
     lines.push(`MOVE ${[plainMoves.length && plural(plainMoves.length, "file"), movedDirs.length && plural(movedDirs.length, "folder")].filter(Boolean).join(" and ")}`);
     lines.push(...listLines(movedDirs, (e) => `  > ${e.from}/ -> ${e.path}/`));
@@ -268,6 +299,10 @@ function render(effects, { opaque = [] } = {}) {
   if (compressed.length) {
     lines.push(`COMPRESS ${plural(compressed.length, "file")} — each original is replaced by its .gz`);
     lines.push(...listLines(compressed, (e) => `  > ${e.from} -> ${e.path}`));
+  }
+  if (decompressed.length) {
+    lines.push(`DECOMPRESS ${plural(decompressed.length, "file")} — each .gz is replaced by its contents`);
+    lines.push(...listLines(decompressed, (e) => `  > ${e.from} -> ${e.path}`));
   }
   if (created.length) {
     lines.push(`CREATE ${plural(created.length, "file")}`);
@@ -280,6 +315,20 @@ function render(effects, { opaque = [] } = {}) {
   const hidden = opaque.filter((dir) => effects.some((e) => [e.path, e.from].some((p) => p && (p === dir || p.startsWith(dir + "/")))));
   if (hidden.length) lines.push(`Note: contents of ${hidden.join(", ")} were not scanned; the real change may include more files.`);
   return lines;
+}
+
+// Does any part of this step (split at | ; && ||) run a command the simulator
+// models in a way that changes files? `tar -t … | awk …` does not.
+function changesFiles(cmd) {
+  const { P } = load();
+  const masked = P.maskQuoted(cmd).text;
+  const parts = [];
+  let start = 0;
+  const re = /\|\||&&|[|;]/g;
+  let m;
+  while ((m = re.exec(masked))) { parts.push(cmd.slice(start, m.index)); start = m.index + m[0].length; }
+  parts.push(cmd.slice(start));
+  return parts.some((part) => triggers(part, ENGINE_COMMANDS) && P.classify(part.trim()).kind !== "readonly");
 }
 
 // Main entry point. Returns
@@ -332,7 +381,7 @@ function reviewCommand(command, cwd, options = {}) {
   if (sim.parseError) reasons.push(sim.parseError);
   const notPreviewed = unsimulated.length ? [
     `NOT PREVIEWED ${plural(unsimulated.length, "step")} that may still run (! = changes files):`,
-    ...listLines(unsimulated, (cmd) => `  ${triggers(cmd, ENGINE_COMMANDS) ? "!" : "?"} ${cmd.length > 110 ? cmd.slice(0, 107) + "..." : cmd}`),
+    ...listLines(unsimulated, (cmd) => `  ${changesFiles(cmd) ? "!" : "?"} ${cmd.length > 110 ? cmd.slice(0, 107) + "..." : cmd}`),
   ] : [];
   if (reasons.length && !effects.length) return fail(reasons.join("; "), unsimulated.length > 1 ? notPreviewed : []);
 

@@ -1,7 +1,7 @@
 {
   "name": "file-review",
   "version": "0.1.0",
-  "description": "Shows every file an rm, cp, mv, mkdir, rmdir, tar or gzip command would delete, overwrite, move or create, right in the approval prompt.",
+  "description": "Shows every file rm, cp, mv, mkdir, rmdir, tar, gzip or gunzip command would delete, overwrite, move, compress or create, right in the approval prompt.",
   "author": {
     "name": "CSE 216 agent file review team"
   },
