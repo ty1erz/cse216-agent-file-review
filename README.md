@@ -223,8 +223,10 @@ Set these as environment variables before starting `claude`:
    folder (never their contents), runs `prototype/engine.js` on that list,
    and answers "ask" with the preview.
 4. If it cannot simulate the command faithfully, it still answers "ask", with
-   "Could not preview" and the reason. A reviewed command never runs without a
-   prompt.
+   "Could not preview" and the reason. When only part of a command could be
+   simulated, the prompt lists every later step under NOT PREVIEWED, marking
+   with `!` those that change files, so an `rm` at the end is never hidden. A
+   reviewed command never runs without a prompt.
 
 It also handles common agent habits: a leading `cd DIR &&`, absolute paths
 inside the folder, `~`, brace lists like `a{1,2}.pdf`, single-command

@@ -249,3 +249,24 @@ test("line continuations and plain variables are understood", () => {
   // A $NAME inside single quotes is literal text, not the variable.
   assert.equal(reviewCommand("X=photos; rm '$X'", dir).effects.length, 0);
 });
+
+test("a partial preview lists every later step, so an rm is never hidden", () => {
+  const dir = workspace({ "logs/a.log": "1", "logs/b.log": "2", "backup/": "" });
+  // Archive, list it, verify in a temp folder, then delete the originals:
+  // the shape Claude used when asked to "archive the logs and delete the originals".
+  const command = 'tar -czf backup/logs.tgz -C logs a.log b.log && tar -tzvf backup/logs.tgz && mkdir -p "$TMPDIR/v_$$" '
+    + '&& tar -xzf backup/logs.tgz -C "$TMPDIR/v_$$" && echo OK && rm -rf "$TMPDIR/v_$$" && rm logs/*.log';
+  const out = decide(bash(command, dir));
+  const text = out.hookSpecificOutput.permissionDecisionReason;
+  assert.equal(out.hookSpecificOutput.permissionDecision, "ask");
+  assert.match(text, /CREATE 1 file/);
+  assert.match(text, /NOT PREVIEWED 4 steps/);
+  assert.match(text, /! rm logs\/\*\.log/);
+  // Read-only steps (tar -t, echo) are not listed as unpreviewed.
+  assert.doesNotMatch(text, /tar -tzvf|echo OK/);
+
+  // When nothing could be simulated, later destructive steps are listed too.
+  const none = decide(bash('mkdir -p "$TMPDIR/x" && rm logs/a.log', dir)).hookSpecificOutput.permissionDecisionReason;
+  assert.match(none, /Could not preview/);
+  assert.match(none, /! rm logs\/a\.log/);
+});

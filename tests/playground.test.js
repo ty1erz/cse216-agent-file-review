@@ -271,3 +271,17 @@ test("read-only verification after a change does not block it", () => {
   // A change whose running depends on an unknown status still blocks.
   assert.equal(simulateSequence("cmp c/a.yaml backup/a.yaml && rm c/a.yaml", files).blocked, true);
 });
+
+test("tar -t succeeds when the archive exists, including one made earlier in the command", () => {
+  const { readonlyStatus, simulateSequence } = loadInternals();
+  const files = [{ path: "logs/a.log", size: 1 }, { path: "old.tgz", size: 5 }];
+  assert.equal(readonlyStatus("tar -tzvf old.tgz", files), true);
+  assert.equal(readonlyStatus("tar -tf missing.tgz", files), false);
+  assert.equal(readonlyStatus("tar -t -f old.tgz", files), true);
+  assert.equal(readonlyStatus("tar -tzf *.tgz", files), null);
+  assert.equal(readonlyStatus("tar -czf new.tgz logs", files), null);
+
+  const r = simulateSequence("tar -czf new.tgz logs && tar -tzf new.tgz && rm logs/a.log", files);
+  assert.equal(r.blocked, false);
+  assert.equal(r.finalFiles.some((f) => f.path === "logs/a.log"), false);
+});

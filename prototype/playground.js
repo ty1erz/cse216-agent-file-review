@@ -110,6 +110,7 @@
     const name = words[0];
     if (name === "true" || name === "echo" || name === "printf" || name === "pwd") return true;
     if (name === "test" || name === "[") return fileTestStatus(words, files);
+    if (name === "tar") return tarListStatus(words, files);
     if (name === "find") {
       const r = Engine.runFind(files, command);
       return r.error ? null : !r.errors.length;
@@ -119,6 +120,25 @@
     const paths = words.slice(1).filter((w, i, all) => !w.startsWith("-") && !/^-[nc]$/.test(all[i - 1] || ""));
     try {
       return paths.every((p) => Engine.expand(tree, p).every((x) => tree.exists(x)));
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // `tar -tzvf ARCHIVE`, which agents run to check an archive they just made,
+  // succeeds when ARCHIVE is a file (including one created earlier in the same
+  // command). Anything else about tar stays unknown.
+  function tarListStatus(words, files) {
+    const bundle = (words[1] || "").replace(/^-/, "");
+    if (!/^[tzjJvf]+$/.test(bundle) || !bundle.includes("t")) return null;
+    let archive = null;
+    if (bundle.endsWith("f")) archive = words[2];
+    else { const i = words.indexOf("-f"); if (i > 1) archive = words[i + 1]; }
+    if (!archive || /[*?[\]$`]/.test(archive) || archive.startsWith("/") || archive.startsWith("~")) return null;
+    try {
+      const tree = new Engine.FileTree(files);
+      const hits = Engine.expand(tree, archive);
+      return hits.length === 1 && tree.isFile(hits[0]);
     } catch (err) {
       return null;
     }

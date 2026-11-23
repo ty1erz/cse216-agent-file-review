@@ -294,10 +294,10 @@ function reviewCommand(command, cwd, options = {}) {
   const moved = splitLeadingCd(command, cwd || process.cwd());
   const root = moved.cwd;
   const header = `File change preview (in ${shortPath(root)})`;
-  const fail = (reason) => ({
+  const fail = (reason, rest = []) => ({
     status: "unpreviewable",
     reason,
-    text: [header, `Could not preview: ${friendly(reason)}`, "Check the command yourself before approving."].join("\n"),
+    text: [header, `Could not preview: ${friendly(reason)}`, ...rest, "Check the command yourself before approving."].join("\n"),
   });
 
   if (!fs.existsSync(root)) return fail(`folder ${root} does not exist`);
@@ -313,6 +313,9 @@ function reviewCommand(command, cwd, options = {}) {
   const effects = [];
   const errors = [];
   const reasons = [];
+  // Every step the simulation did not cover and that is not proven read-only.
+  // A partial preview must never hide a later rm behind its first reason.
+  const unsimulated = [];
   for (const step of sim.steps) {
     // A blocked result means the engine refused to simulate (outside the
     // folder, unsupported flag...): that is "can't preview", not a run error.
@@ -323,16 +326,22 @@ function reviewCommand(command, cwd, options = {}) {
     // unknown outcome means the preview may be wrong.
     const normalSkip = step.harmless || /^the previous command (failed|succeeded)$/.test(step.skipReason || "");
     if (step.skipped && step.skipReason && !normalSkip && !reasons.length) reasons.push(`\`${step.cmd}\` skipped: ${step.skipReason}`);
+    const missed = (step.r && step.r.blocked) || (!step.skipped && step.cls && step.cls.kind === "changes") || (step.skipped && !normalSkip);
+    if (missed && !(step.cls && step.cls.kind === "readonly")) unsimulated.push(step.cmd);
   }
   if (sim.parseError) reasons.push(sim.parseError);
-  if (reasons.length && !effects.length) return fail(reasons.join("; "));
+  const notPreviewed = unsimulated.length ? [
+    `NOT PREVIEWED ${plural(unsimulated.length, "step")} that may still run (! = changes files):`,
+    ...listLines(unsimulated, (cmd) => `  ${triggers(cmd, ENGINE_COMMANDS) ? "!" : "?"} ${cmd.length > 110 ? cmd.slice(0, 107) + "..." : cmd}`),
+  ] : [];
+  if (reasons.length && !effects.length) return fail(reasons.join("; "), unsimulated.length > 1 ? notPreviewed : []);
 
   const touchesLink = snap.symlinks.filter((link) => effects.some((e) => e.path === link || e.from === link));
   const lines = [header, ...render(effects, snap)];
   if (!effects.length) lines.push("No files would change.");
   if (touchesLink.length) lines.push(`Note: ${touchesLink.join(", ")} ${touchesLink.length === 1 ? "is a symlink" : "are symlinks"}; the preview treats links as files.`);
   if (errors.length) lines.push("Errors the command would hit:", ...errors.slice(0, MAX_LIST).map((e) => `  x ${e}`));
-  if (reasons.length) lines.push(`Partly previewed: ${reasons.map(friendly).join("; ")}`);
+  if (reasons.length) lines.push(...notPreviewed, `Partly previewed: ${reasons.map(friendly).join("; ")}`);
   return {
     status: reasons.length ? "unpreviewable" : "preview",
     reason: reasons.join("; "),
