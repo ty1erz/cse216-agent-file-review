@@ -5,7 +5,7 @@
     {
       "name": "file-review",
       "source": "./",
-      "description": "Preview the files rm, cp and mv would change before approving them in Claude Code."
+      "description": "Preview the files rm, cp, mv, mkdir, rmdir, tar and gzip would change before approving them in Claude Code."
     }
   ]
 }

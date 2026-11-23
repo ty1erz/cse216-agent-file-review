@@ -39,9 +39,9 @@ function listing(dir) {
 
 const bash = (command, cwd) => ({ tool_name: "Bash", tool_input: { command }, cwd });
 
-test("ignores commands that are not rm, cp or mv", () => {
+test("ignores commands that do not change files through a reviewed command", () => {
   const dir = workspace({ "a.txt": "a" });
-  for (const command of ["ls -la", "git mv a.txt b.txt", 'echo "rm -rf a.txt"', "npm run rm", "mkdir out", 'git commit -m "mv files"']) {
+  for (const command of ["ls -la", "git mv a.txt b.txt", 'echo "rm -rf a.txt"', "npm run rm", 'git commit -m "mv files"', 'echo "tar -czf x.tgz ."']) {
     assert.equal(reviewCommand(command, dir).status, "skip", command);
     assert.equal(decide(bash(command, dir)), null, command);
   }
@@ -120,7 +120,8 @@ test("previews find -delete and for loops by expanding them", () => {
 
 test("FILE_REVIEW_COMMANDS widens or narrows what is reviewed", () => {
   const dir = workspace({ "a.txt": "a" });
-  assert.equal(reviewCommand("mkdir out", dir, { env: { FILE_REVIEW_COMMANDS: "rm,cp,mv,mkdir" } }).status, "preview");
+  assert.equal(reviewCommand("tar -czf a.tgz a.txt", dir).status, "preview");
+  assert.equal(reviewCommand("tar -czf a.tgz a.txt", dir, { env: { FILE_REVIEW_COMMANDS: "rm,cp,mv" } }).status, "skip");
   assert.equal(reviewCommand("cp a.txt b.txt", dir, { env: { FILE_REVIEW_COMMANDS: "rm" } }).status, "skip");
 });
 
@@ -206,4 +207,43 @@ test("common agent habits are understood", () => {
   assert.equal(reviewCommand("if [ -d build ]; then rm -r build; else echo no; fi", dir).status, "unpreviewable");
   assert.equal(reviewCommand("rm logs/{a..b}.log", dir).status, "unpreviewable");
   assert.equal(reviewCommand('rm "logs/{a,b}.log"', dir).effects.length, 0);
+});
+
+test("reviews mkdir, rmdir, tar and gzip by default", () => {
+  const dir = workspace({ "logs/a.log": "1".repeat(100), "logs/b.log": "2", "empty/": "", "out/": "" });
+  const ask = (command) => decide(bash(command, dir));
+
+  // A bare mkdir only adds empty folders, so it gets no extra prompt.
+  assert.equal(reviewCommand("mkdir -p archive/2026", dir).status, "preview");
+  assert.equal(ask("mkdir -p archive/2026"), null);
+  // mkdir together with a change is previewed as one step.
+  assert.match(ask("mkdir -p archive && mv logs/*.log archive/").hookSpecificOutput.permissionDecisionReason, /MOVE 2 files[\s\S]*NEW FOLDER 1 folder/);
+
+  assert.match(ask("rmdir empty").hookSpecificOutput.permissionDecisionReason, /DELETE 1 folder/);
+  assert.match(ask("gzip logs/a.log").hookSpecificOutput.permissionDecisionReason, /COMPRESS 1 file[\s\S]*logs\/a\.log -> logs\/a\.log\.gz/);
+  assert.match(ask("gzip -k logs/b.log").hookSpecificOutput.permissionDecisionReason, /CREATE 1 file/);
+
+  // tar -C reads the names from inside the folder; the archive path is not.
+  const tarC = ask("tar -czf out/logs.tgz -C logs a.log b.log").hookSpecificOutput.permissionDecisionReason;
+  assert.match(tarC, /\+ out\/logs\.tgz {2}\(from logs\/a\.log logs\/b\.log\)/);
+  // Listing an archive changes nothing; extracting cannot be previewed but still asks.
+  assert.equal(ask("tar -tzf out/logs.tgz"), null);
+  assert.match(ask("tar -xzf out/logs.tgz").hookSpecificOutput.permissionDecisionReason, /Could not preview/);
+});
+
+test("line continuations and plain variables are understood", () => {
+  const dir = workspace({ "photos/IMG_1.jpg": "x", "finance/2026/inv_1.pdf": "y" });
+  const cont = reviewCommand("mkdir -p photos/2025 \\\n  && mv -n photos/IMG_1.jpg photos/2025/", dir);
+  assert.equal(cont.status, "preview", cont.text);
+  assert.match(cont.text, /photos\/IMG_1\.jpg -> photos\/2025\/IMG_1\.jpg/);
+
+  const vars = reviewCommand(`B=${dir}; F=$B/finance/2026; mkdir -p "$F/01" && mv -n $F/inv_1.pdf \${F}/01/`, dir);
+  assert.equal(vars.status, "preview", vars.text);
+  assert.match(vars.text, /finance\/2026\/inv_1\.pdf -> finance\/2026\/01\/inv_1\.pdf/);
+
+  // Not plain assignments: left alone, so they still ask instead of guessing.
+  assert.equal(reviewCommand("X=$(ls); rm $X", dir).status, "unpreviewable");
+  assert.equal(reviewCommand("X=a b; rm $X", dir).status, "unpreviewable");
+  // A $NAME inside single quotes is literal text, not the variable.
+  assert.equal(reviewCommand("X=photos; rm '$X'", dir).effects.length, 0);
 });

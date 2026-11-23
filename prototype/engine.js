@@ -779,9 +779,16 @@
     let letters = "";
     let archive = null;
     const operands = [];
+    // -C DIR: names after it are read from inside DIR (the archive path is not).
+    let dir = null;
     for (let i = 0; i < tokens.length; i++) {
       const v = tokens[i].value;
       const isFirstBundle = i === 0 && /^[cxtrudzjJvf]+$/.test(v);
+      if (v === "-C") {
+        dir = tokens[++i];
+        if (!dir) return block("tar: -C needs a folder");
+        continue;
+      }
       if (v.startsWith("--")) return block(`tar: unsupported option ${v}`);
       if (v.startsWith("-") || isFirstBundle) {
         const bundle = v.replace(/^-/, "");
@@ -796,7 +803,9 @@
         }
         continue;
       }
-      operands.push(tokens[i]);
+      operands.push(dir
+        ? { value: dir.value + "/" + tokens[i].value, unquoted: [...dir.unquoted, false, ...tokens[i].unquoted] }
+        : tokens[i]);
     }
     if (!letters.includes("c")) return block("tar: only creating archives (-c) can be previewed");
     if (!archive) return block("tar: -f ARCHIVE is required in this prototype");

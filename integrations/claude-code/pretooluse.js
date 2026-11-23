@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Claude Code PreToolUse hook for the Bash tool. When a command runs rm, cp or
-// mv (configurable with FILE_REVIEW_COMMANDS), it replaces the plain approval
-// prompt with one that lists every file the command would change. Commands we
-// don't review produce no output, so Claude Code's normal permissions apply.
+// Claude Code PreToolUse hook for the Bash tool. When a command runs rm, cp,
+// mv, mkdir, rmdir, tar or gzip (configurable with FILE_REVIEW_COMMANDS), it
+// replaces the plain approval prompt with one that lists every file the
+// command would change. Commands we don't review produce no output, so
+// Claude Code's normal permissions apply.
 
 "use strict";
 
@@ -25,6 +26,9 @@ function outputFor(review, env) {
   // An empty preview (e.g. `rm -f missing.txt`) changes nothing; let it through
   // to Claude Code's own permission rules instead of adding a prompt.
   if (review.status === "preview" && !review.effects.length && !review.errors.length) return null;
+  // Only new, empty folders (a bare `mkdir -p out`): nothing existing is
+  // touched, so don't add a prompt for it either.
+  if (review.status === "preview" && !review.errors.length && review.effects.every((e) => e.type === "mkdir")) return null;
   const strict = env.FILE_REVIEW_STRICT === "1";
   const deny = strict && review.status === "unpreviewable";
   return {

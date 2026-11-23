@@ -260,3 +260,14 @@ test("backslash-escaped spaces and ~/ paths resolve like Bash", () => {
 
   assert.equal(Engine.simulate(files, "rm ~other/file.txt").blocked, true);
 });
+
+test("tar -C reads the names inside the folder but writes the archive where named", () => {
+  const Engine = loadContext().window.Engine;
+  const files = [{ path: "logs/a.log", size: 10 }, { path: "logs/b.log", size: 5 }, { path: "backup/" }];
+  const r = Engine.simulate(files, "tar -czf backup/logs.tgz -C logs a.log b.log");
+  assert.equal(r.blocked, false, r.errors.join(" "));
+  assert.deepEqual(effectPaths(r, "create"), ["backup/logs.tgz"]);
+  assert.equal(r.effects[0].after.size, 15);
+  assert.equal(Engine.simulate(files, "tar -czf backup/x.tgz -C logs missing.log").errors.length, 1);
+  assert.equal(Engine.simulate(files, "tar -czf backup/x.tgz -C").blocked, true);
+});

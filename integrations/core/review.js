@@ -15,9 +15,9 @@ const vm = require("node:vm");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 
-// Commands that trigger a review. Start small; the engine already simulates
-// mkdir, rmdir, tar -c and gzip too, so widening this is a config change.
-const DEFAULT_COMMANDS = ["rm", "cp", "mv"];
+// Commands that trigger a review: every command the simulator models.
+// FILE_REVIEW_COMMANDS can narrow it (e.g. "rm,cp,mv").
+const DEFAULT_COMMANDS = ["rm", "cp", "mv", "mkdir", "rmdir", "tar", "gzip"];
 const ENGINE_COMMANDS = new Set(["rm", "cp", "mv", "mkdir", "rmdir", "tar", "gzip"]);
 
 // Folders that are usually huge and rarely the target. They are only scanned
@@ -95,11 +95,14 @@ function relativize(command, root, home = os.homedir()) {
 //   `if TEST; then CMD; fi` with one command, which changes files exactly
 //   like `TEST && CMD`; and
 //   brace lists such as invoice_0{4,5}.pdf, which Bash expands into separate
-//   words before anything else.
+//   words before anything else;
+//   a backslash at the end of a line, which only continues the command; and
+//   NAME=value; ... $NAME with a plain value, which is the same as writing the
+//   value in place.
 // maskQuoted() keeps every character in place, so match positions found in
 // the masked text apply to the original.
 function normalizeHabits(command, maskQuoted) {
-  let out = command;
+  let out = inlineVariables(command.replace(/\\\r?\n[ \t]*/g, " "), maskQuoted);
   for (;;) {
     const m = maskQuoted(out).text.match(/\s*(?:&&|;)\s*cd(?:\s+[^\s;&|]+)?\s*;?\s*$/);
     if (!m) break;
@@ -114,6 +117,34 @@ function normalizeHabits(command, maskQuoted) {
     out = out.slice(0, start) + `${cond} && ${body}` + out.slice(end);
   }
   return expandBraces(out, maskQuoted);
+}
+
+// `B=/x/y; F=$B/z; mv $F/a ...` becomes `mv /x/y/z/a ...`. Only plain values
+// (no spaces, quotes or expansions) at the top level, ended by ; or &&.
+function inlineVariables(command, maskQuoted) {
+  let out = command;
+  for (let guard = 0; guard < 10; guard++) {
+    const m = /(?:^|;|&&)\s*([A-Za-z_][A-Za-z0-9_]*)=([^\s;&|'"`$()<>\\]*)\s*(?:;|&&)/d.exec(maskQuoted(out).text);
+    if (!m) break;
+    const name = m[1];
+    const value = out.slice(...m.indices[2]);
+    let rest = out.slice(m.indices[0][1]);
+    // A $ that survives masking is live (unquoted or in double quotes); the
+    // name after it is read from the original text, since masking blanks
+    // letters inside quotes.
+    const masked = maskQuoted(rest).text;
+    const ref = new RegExp(`^\\$(?:\\{${name}\\}|${name}(?![A-Za-z0-9_]))`);
+    let replaced = "", last = 0;
+    for (let i = masked.indexOf("$"); i !== -1; i = masked.indexOf("$", i + 1)) {
+      const x = ref.exec(rest.slice(i));
+      if (!x || i < last) continue;
+      replaced += rest.slice(last, i) + value;
+      last = i + x[0].length;
+    }
+    rest = replaced + rest.slice(last);
+    out = out.slice(0, m.indices[1][0]) + rest.replace(/^\s+/, "");
+  }
+  return out;
 }
 
 // Unquoted {a,b,c} inside a word becomes one word per item: x{1,2}y -> x1y x2y.
@@ -224,11 +255,17 @@ function render(effects, { opaque = [] } = {}) {
     lines.push(`OVERWRITE ${plural(overwritten.length, "file")} — old contents are lost`);
     lines.push(...listLines(overwritten, (e) => `  ! ${e.path}  (${humanSize(e.before.size)}, replaced by ${e.from})`));
   }
-  const plainMoves = moved.filter((e) => !e.before);
+  // gzip replaces x with x.gz: a move in the simulator, a compression to the user.
+  const compressed = moved.filter((e) => !e.before && e.path === e.from + ".gz");
+  const plainMoves = moved.filter((e) => !e.before && !compressed.includes(e));
   if (plainMoves.length || movedDirs.length) {
     lines.push(`MOVE ${[plainMoves.length && plural(plainMoves.length, "file"), movedDirs.length && plural(movedDirs.length, "folder")].filter(Boolean).join(" and ")}`);
     lines.push(...listLines(movedDirs, (e) => `  > ${e.from}/ -> ${e.path}/`));
     lines.push(...listLines(plainMoves, (e) => `  > ${e.from} -> ${e.path}`));
+  }
+  if (compressed.length) {
+    lines.push(`COMPRESS ${plural(compressed.length, "file")} — each original is replaced by its .gz`);
+    lines.push(...listLines(compressed, (e) => `  > ${e.from} -> ${e.path}`));
   }
   if (created.length) {
     lines.push(`CREATE ${plural(created.length, "file")}`);
