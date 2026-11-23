@@ -155,14 +155,31 @@ function inlineDates(command, maskQuoted, now = new Date()) {
 function inlineVariables(command, maskQuoted) {
   let out = command;
   for (let guard = 0; guard < 10; guard++) {
-    const m = /(?:^|;|&&)\s*([A-Za-z_][A-Za-z0-9_]*)=([^\s;&|'"`$()<>\\]*)\s*(?:;|&&)/d.exec(maskQuoted(out).text);
+    // Find NAME= at the start of a step in the masked text, then read the
+    // value from the original: masking blanks quoted text, so a quoted value
+    // would otherwise look empty.
+    const m = /(?:^|;|&&)\s*([A-Za-z_][A-Za-z0-9_]*)=/d.exec(maskQuoted(out).text);
     if (!m) break;
     const name = m[1];
-    const value = out.slice(...m.indices[2]);
-    let rest = out.slice(m.indices[0][1]);
+    const valueStart = m.indices[0][1];
+    let value, valueEnd;
+    const q = out[valueStart];
+    if (q === '"' || q === "'") {
+      const close = out.indexOf(q, valueStart + 1);
+      if (close === -1) break;
+      value = out.slice(valueStart + 1, close);
+      valueEnd = close + 1;
+    } else {
+      value = /^[^\s;&|'"`$()<>\\]*/.exec(out.slice(valueStart))[0];
+      valueEnd = valueStart + value.length;
+    }
+    // Only plain, non-empty values: no spaces, quotes or expansions.
+    if (!value || /[\s'"`$\\]/.test(value)) break;
+    const sep = /^\s*(?:;|&&)\s*/.exec(out.slice(valueEnd));
+    if (!sep) break;
+    let rest = out.slice(valueEnd + sep[0].length);
     // A $ that survives masking is live (unquoted or in double quotes); the
-    // name after it is read from the original text, since masking blanks
-    // letters inside quotes.
+    // name after it is read from the original text.
     const masked = maskQuoted(rest).text;
     const ref = new RegExp(`^\\$(?:\\{${name}\\}|${name}(?![A-Za-z0-9_]))`);
     let replaced = "", last = 0;
@@ -173,7 +190,7 @@ function inlineVariables(command, maskQuoted) {
       last = i + x[0].length;
     }
     rest = replaced + rest.slice(last);
-    out = out.slice(0, m.indices[1][0]) + rest.replace(/^\s+/, "");
+    out = out.slice(0, m.indices[1][0]) + rest;
   }
   return out;
 }

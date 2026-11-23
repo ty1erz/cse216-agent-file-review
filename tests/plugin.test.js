@@ -298,3 +298,20 @@ test("dated names, tar --exclude and gzip -t checks are previewed", () => {
   assert.match(checked.text, /DELETE 1 file/);
   assert.match(checked.text, /CREATE 1 file/);
 });
+
+test("quoted variable values are read, not mistaken for empty", () => {
+  const dir = workspace({ "docs/a.md": "a", "backup/": "" });
+  const now = new Date();
+  const ymd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  // The exact shape Claude used for "make a dated tar.gz backup of docs".
+  const r = reviewCommand('f="backup/docs-$(date +%Y-%m-%d).tar.gz" && tar -czf "$f" docs && ls -l "$f" && tar -tzf "$f"', dir);
+  assert.equal(r.status, "preview", r.text);
+  assert.match(r.text, new RegExp(`\\+ backup/docs-${ymd}\\.tar\\.gz`));
+  assert.equal(reviewCommand("f='backup/x.tgz'; tar -czf $f docs", dir).status, "preview");
+  // Values that are empty, contain spaces or expand something are not guessed.
+  for (const command of ['f= && rm "$f"', 'f="a b.tgz" && tar -czf "$f" docs', 'f="$HOME/x" && rm "$f"']) {
+    const out = reviewCommand(command, dir);
+    assert.equal(out.status, "unpreviewable", command);
+    assert.doesNotMatch(out.text, /Empty paths/, command);
+  }
+});
