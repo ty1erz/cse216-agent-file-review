@@ -84,3 +84,28 @@ darwin("writes outside the folder or slow commands fall back to the simulator", 
   assert.match(slow.text, /took longer than/);
   assert.ok(fs.existsSync(path.join(dir, "a.txt")));
 });
+
+darwin("a leading cd picks the folder, and temp scratch writes are redirected", () => {
+  const dir = workspace({ "logs/a.log": "1", "logs/b.log": "2", "backup/": "" });
+  const scratch = path.join(os.tmpdir(), `file-review-scratch-${process.pid}`, "verify");
+  // The agent's shell is still in logs/ from an earlier step; the command
+  // cds to the parent, archives, verifies in a temp folder and deletes.
+  const command = `cd ${dir} && tar -czf backup/logs.tgz -C logs a.log b.log && mkdir -p ${scratch} `
+    + `&& tar -xzf backup/logs.tgz -C ${scratch} && cmp logs/a.log ${scratch}/a.log && rm logs/*.log`;
+  const r = reviewCommand(command, path.join(dir, "logs"));
+  assert.equal(r.mode, "dry-run", r.text);
+  assert.match(r.text, /DELETE 2 files/);
+  assert.match(r.text, /\+ backup\/logs\.tgz/);
+  assert.match(r.text, /temporary folders/);
+  assert.equal(fs.existsSync(scratch), false, "the real temp folder is never written");
+  assert.ok(fs.existsSync(path.join(dir, "logs", "a.log")));
+});
+
+darwin("any write outside the folder falls back, whatever the command prints", () => {
+  const dir = workspace({ "a.txt": "a" });
+  // tar reports "Failed to open", not "Operation not permitted".
+  const r = reviewCommand(`tar -czf ${os.homedir()}/file-review-escape.tgz a.txt && rm a.txt`, dir);
+  assert.notEqual(r.mode, "dry-run");
+  assert.match(r.text, /writes outside the working folder/);
+  assert.equal(fs.existsSync(path.join(os.homedir(), "file-review-escape.tgz")), false);
+});

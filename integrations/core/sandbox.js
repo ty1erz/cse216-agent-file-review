@@ -17,9 +17,12 @@ function available() {
   return process.platform === "darwin" && fs.existsSync(SANDBOX_EXEC);
 }
 
+// A write outside the clone kills the command, so it is detected whatever
+// error message the command would have printed.
 function profile(dir) {
   return `(version 1)(allow default)(deny network*)
-(deny file-write* (require-not (require-any (subpath "${dir}") (literal "/dev/null") (literal "/dev/tty") (regex #"^/dev/fd/"))))`;
+(deny file-write* (require-not (require-any (subpath "${dir}") (literal "/dev/null") (literal "/dev/dtracehelper") (regex #"^/dev/fd/") (regex #"^/dev/tty")))
+  (with send-signal SIGKILL))`;
 }
 
 function countEntries(dir, limit) {
@@ -63,6 +66,26 @@ function retarget(command, root, clone) {
     out = out.replace(new RegExp(`(^|[\\s'"=:])${esc}(?=/|[\\s'";&|)]|$)`, "g"), (_, lead) => lead + clone);
   }
   return out;
+}
+
+// Temp folders outside the working folder (where agents keep scratch files)
+// are redirected into the sandbox, so the real ones are never written.
+const TEMP_ROOTS = ["/private/tmp/", "/tmp/", "/private/var/folders/", "/var/folders/"];
+function shadowTemp(command, base) {
+  let used = false;
+  const out = command.replace(/(^|[\s'"=:])(\/[^\s'";&|)<>]+)/g, (m, lead, p) => {
+    if (p.startsWith(base) || !TEMP_ROOTS.some((t) => p.startsWith(t))) return m;
+    const shadow = path.join(base, "shadow", p);
+    let real = p;
+    while (real !== "/" && !fs.existsSync(real)) real = path.dirname(real);
+    if (real !== "/") {
+      const dir = fs.statSync(real).isDirectory() ? real : path.dirname(real);
+      fs.mkdirSync(path.join(base, "shadow", dir), { recursive: true });
+    }
+    used = true;
+    return lead + shadow;
+  });
+  return { command: out, used };
 }
 
 function diff(before, after) {
@@ -133,7 +156,7 @@ function diff(before, after) {
   return effects;
 }
 
-function dryRun(command, root) {
+function dryRun(command, root, workdir = root) {
   if (!available()) return { ok: false, reason: "no macOS sandbox on this system" };
   if (countEntries(root, MAX_ENTRIES) > MAX_ENTRIES) return { ok: false, reason: `the folder has more than ${MAX_ENTRIES} entries` };
 
@@ -148,9 +171,11 @@ function dryRun(command, root) {
     if (cp.status !== 0) return { ok: false, reason: "could not clone the folder" };
 
     const before = walk(clone);
-    const run = spawnSync(SANDBOX_EXEC, ["-p", profile(base), "/bin/bash", "-c", retarget(command, root, clone)], {
-      cwd: clone,
-      env: { ...process.env, TMPDIR: tmp + "/", PWD: clone },
+    const shadowed = shadowTemp(retarget(command, root, clone), base);
+    const cwd = path.join(clone, path.relative(root, workdir));
+    const run = spawnSync(SANDBOX_EXEC, ["-p", profile(base), "/bin/bash", "-c", shadowed.command], {
+      cwd,
+      env: { ...process.env, TMPDIR: tmp + "/", PWD: cwd },
       input: "",
       encoding: "utf8",
       timeout: TIMEOUT_MS,
@@ -160,13 +185,13 @@ function dryRun(command, root) {
     if (run.error && run.error.code === "ETIMEDOUT") return { ok: false, reason: `the dry run took longer than ${TIMEOUT_MS / 1000} s` };
     if (run.error) return { ok: false, reason: run.error.message };
     if (/sandbox_apply|sandbox-exec:/.test(stderr)) return { ok: false, reason: "the sandbox could not start here" };
-    if (/Operation not permitted/.test(stderr)) return { ok: false, reason: "the command writes outside the working folder" };
+    if (run.signal === "SIGKILL" || run.status === 137) return { ok: false, reason: "the command writes outside the working folder" };
     if (/Could not resolve host|nodename nor servname|Network is unreachable/.test(stderr)) return { ok: false, reason: "the command needs the network" };
 
-    return { ok: true, effects: diff(before, walk(clone)), exitCode: run.status, stderr: stderr.trim() };
+    return { ok: true, effects: diff(before, walk(clone)), exitCode: run.status, stderr: stderr.trim(), usedTemp: shadowed.used };
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
 }
 
-module.exports = { available, dryRun, diff, retarget };
+module.exports = { available, dryRun, diff, retarget, shadowTemp };

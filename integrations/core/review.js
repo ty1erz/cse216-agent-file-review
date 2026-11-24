@@ -331,8 +331,15 @@ function reviewCommand(command, cwd, options = {}) {
   const mode = (options.env && options.env.FILE_REVIEW_MODE) || process.env.FILE_REVIEW_MODE || "auto";
   let note = null;
   if (mode !== "simulate") {
-    const run = sandbox.dryRun(command, cwd);
-    if (run.ok) return fromDryRun(run, cwd);
+    // Copy the closest folder holding both the shell's folder and a leading
+    // `cd` target: the shell may still be in a subfolder from an earlier step.
+    const target = splitLeadingCd(command, cwd).cwd;
+    let root = cwd;
+    if (target !== cwd && fs.existsSync(target)) {
+      while (root !== path.dirname(root) && path.relative(root, target).startsWith("..")) root = path.dirname(root);
+    }
+    const run = sandbox.dryRun(command, root, cwd);
+    if (run.ok) return fromDryRun(run, root);
     note = `Dry run not possible (${run.reason}); simulated instead.`;
   }
   return simulate(command, cwd, note);
@@ -342,6 +349,7 @@ function fromDryRun(run, cwd) {
   const errors = run.exitCode === 0 ? [] : [`exits with status ${run.exitCode}${run.stderr ? `: ${run.stderr.split("\n")[0].slice(0, 160)}` : ""}`];
   const lines = [`File change preview (dry run in a sandboxed copy of ${shortPath(cwd)})`, ...render(run.effects)];
   if (!run.effects.length) lines.push("No files would change.");
+  if (run.usedTemp) lines.push("Note: it also writes to temporary folders outside this one; those are not shown.");
   if (errors.length) lines.push("Errors the command would hit:", ...errors.map((e) => `  x ${e}`));
   return { status: "preview", mode: "dry-run", text: lines.join("\n"), effects: run.effects, errors };
 }
