@@ -5,7 +5,7 @@
     {
       "name": "file-review",
       "source": "./",
-      "description": "Preview the files rm, cp, mv, mkdir, rmdir, tar, gzip and gunzip would change before approving them in Claude Code."
+      "description": "Preview the files rm, cp, mv, mkdir, rmdir, tar, gzip and gunzip would change before approving them in Claude Code. See which files Claude plans to delete, overwrite, move or create before you approve. Enable File Review in a local Claude Code session, ask Claude to work with files, then review the preview and choose Allow once or Deny. Requires Node.js 20 or later."
     }
   ]
 }
