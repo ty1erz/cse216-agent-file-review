@@ -1,7 +1,6 @@
-// The Claude Code plugin runs the prototype engine against a snapshot of a real
-// folder. These tests build temporary folders and check the hook's decisions;
-// no test deletes anything outside its own temp folder, and the hook never
-// changes files at all.
+// Simulator path of the plugin, on temporary folders. The dry-run path is
+// covered in sandbox.test.js.
+process.env.FILE_REVIEW_MODE = "simulate";
 
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");

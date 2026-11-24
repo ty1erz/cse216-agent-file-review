@@ -1,11 +1,13 @@
 {
   "name": "cse216-agent-file-review",
-  "owner": { "name": "CSE 216 agent file review team" },
+  "owner": {
+    "name": "CSE 216 agent file review team"
+  },
   "plugins": [
     {
       "name": "file-review",
       "source": "./",
-      "description": "Preview the files rm, cp, mv, mkdir, rmdir, tar, gzip and gunzip would change before approving them in Claude Code."
+      "description": "Preview the files a Bash command would change before approving it in Claude Code."
     }
   ]
 }

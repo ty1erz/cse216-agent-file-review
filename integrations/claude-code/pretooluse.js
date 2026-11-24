@@ -1,9 +1,6 @@
 #!/usr/bin/env node
-// Claude Code PreToolUse hook for the Bash tool. When a command runs rm, cp,
-// mv, mkdir, rmdir, tar, gzip or gunzip (configurable with FILE_REVIEW_COMMANDS), it
-// replaces the plain approval prompt with one that lists every file the
-// command would change. Commands we don't review produce no output, so
-// Claude Code's normal permissions apply.
+// Claude Code PreToolUse hook for Bash: answers "ask" with a file preview for
+// reviewed commands, and prints nothing for the rest.
 
 "use strict";
 
@@ -23,8 +20,7 @@ function decide(input, env = process.env) {
 
 function outputFor(review, env) {
   if (review.status === "skip") return null;
-  // An empty preview (e.g. `rm -f missing.txt`) changes nothing; let it through
-  // to Claude Code's own permission rules instead of adding a prompt.
+  // Nothing would change (e.g. `rm -f missing.txt`): leave it to Claude Code.
   if (review.status === "preview" && !review.effects.length && !review.errors.length) return null;
   const strict = env.FILE_REVIEW_STRICT === "1";
   const deny = strict && review.status === "unpreviewable";
@@ -48,8 +44,6 @@ function main() {
       const input = JSON.parse(raw || "{}");
       const { review, output } = evaluate(input);
       if (output) process.stdout.write(JSON.stringify(output));
-      // FILE_REVIEW_LOG=<file.jsonl> records every Bash command and what the
-      // plugin did with it, for checking coverage against real agent runs.
       if (process.env.FILE_REVIEW_LOG && review) {
         fs.appendFileSync(process.env.FILE_REVIEW_LOG, JSON.stringify({
           time: new Date().toISOString(),
@@ -62,8 +56,7 @@ function main() {
         }) + "\n");
       }
     } catch (err) {
-      // Never break the Bash tool because the preview failed; fall back to the
-      // normal prompt and leave a trace for `claude --debug`.
+      // A failed preview must not break the Bash tool; the normal prompt still applies.
       process.stderr.write(`file-review: ${err && err.stack || err}\n`);
     }
     process.exit(0);
