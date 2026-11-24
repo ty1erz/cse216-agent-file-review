@@ -1,10 +1,8 @@
-// Harness-agnostic core of the file-review plugin. Given a shell command and the
-// folder it runs in, it decides whether the command is one we review, snapshots
-// the real files it could touch, runs the prototype's preview engine on that
-// snapshot and renders a plain-text preview. Nothing here changes real files.
-//
-// Agent integrations (integrations/<harness>/) only translate their hook format
-// to reviewCommand() and back, so adding Codex or Cline later reuses all of this.
+// Core of the file-review plugin, independent of any agent. reviewCommand()
+// decides whether a command is reviewed and previews it: first as a dry run in
+// a sandboxed copy of the folder (sandbox.js), otherwise by simulating it on a
+// list of file names, sizes and dates with the prototype's engine. Real files
+// are never changed.
 
 "use strict";
 
@@ -12,16 +10,16 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const vm = require("node:vm");
+const sandbox = require("./sandbox.js");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 
-// Commands that trigger a review: every command the simulator models.
-// FILE_REVIEW_COMMANDS can narrow it (e.g. "rm,cp,mv").
-const DEFAULT_COMMANDS = ["rm", "cp", "mv", "mkdir", "rmdir", "tar", "gzip", "gunzip"];
+// Commands that trigger a review. The simulator models all but zip, unzip and
+// rsync, which only the dry run can preview. FILE_REVIEW_COMMANDS narrows it.
+const DEFAULT_COMMANDS = ["rm", "cp", "mv", "mkdir", "rmdir", "tar", "gzip", "gunzip", "zip", "unzip", "rsync"];
 const ENGINE_COMMANDS = new Set(DEFAULT_COMMANDS);
 
-// Folders that are usually huge and rarely the target. They are only scanned
-// when the command names them; otherwise they are kept as opaque entries.
+// Simulator only: large folders are scanned only when the command names them.
 const SKIP_UNLESS_NAMED = new Set([".git", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build", "target", ".cache"]);
 const MAX_ENTRIES = 20000;
 const MAX_LIST = 15;
@@ -59,9 +57,7 @@ function triggers(command, commands) {
   return commands.has("rm") && /(^|\s)-delete(\s|$)/.test(masked);
 }
 
-// A leading `cd DIR &&` or `cd DIR;` (common in agent commands) moves the
-// preview root. After `;` the rest runs even if cd fails, but DIR is the
-// agent's own working folder in practice, so both are treated alike.
+// A leading `cd DIR &&` or `cd DIR;` moves the simulation root.
 function splitLeadingCd(command, cwd) {
   const m = command.match(/^\s*cd\s+("[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*([\s\S]+)$/);
   if (!m) return { command, cwd };
@@ -70,10 +66,8 @@ function splitLeadingCd(command, cwd) {
   return { command: m[2], cwd: path.resolve(cwd, dir) };
 }
 
-// The engine only knows paths relative to its root, and it reads ~ as that
-// root. So expand an unquoted ~ to the real home folder first, then rewrite
-// absolute paths inside the root as relative ones. Paths that stay absolute
-// are outside the root, and the engine refuses them.
+// The engine reads ~ as its root and refuses absolute paths: expand ~ to the
+// real home folder, then make absolute paths inside the root relative.
 function relativize(command, root, home = os.homedir()) {
   let out = command;
   if (/(^|\s)~(?=\/|\s|$)/.test(out)) {
@@ -83,26 +77,16 @@ function relativize(command, root, home = os.homedir()) {
   const prefixes = new Set([root]);
   try { prefixes.add(fs.realpathSync(root)); } catch {}
   for (const p of [...prefixes]) if (p.startsWith("/private/")) prefixes.add(p.slice("/private".length));
-  // Longest first, so /private/tmp/x is not half-matched as /tmp/x.
   for (const prefix of [...prefixes].sort((a, b) => b.length - a.length)) {
     const esc = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // root/x -> x   and   root -> .   (a leading ./ would block globs)
     out = out.replace(new RegExp(`(^|[\\s'"=])${esc}(/+|(?=[\\s'"]|$))`, "g"), (_, lead, slash) => lead + (slash ? "" : "."));
   }
   return { command: out, error: null };
 }
 
-// Agent habits that are harmless for files but outside the engine's subset:
-//   a trailing `&& cd ..` (it only moves the shell), and
-//   `if TEST; then CMD; fi` with one command, which changes files exactly
-//   like `TEST && CMD`; and
-//   brace lists such as invoice_0{4,5}.pdf, which Bash expands into separate
-//   words before anything else;
-//   a backslash at the end of a line, which only continues the command; and
-//   NAME=value; ... $NAME with a plain value, which is the same as writing the
-//   value in place.
-// maskQuoted() keeps every character in place, so match positions found in
-// the masked text apply to the original.
+// Rewrite shell forms the engine does not parse into equivalent ones it does:
+// line continuations, $(date), plain variables, a trailing `&& cd ..`,
+// one-command `if`, and brace lists. maskQuoted() keeps character positions.
 function normalizeHabits(command, maskQuoted) {
   let out = inlineVariables(inlineDates(command.replace(/\\\r?\n[ \t]*/g, " "), maskQuoted), maskQuoted);
   for (;;) {
@@ -121,8 +105,7 @@ function normalizeHabits(command, maskQuoted) {
   return expandBraces(out, maskQuoted);
 }
 
-// `$(date +%Y%m%d)` and similar become the current date, so a dated file name
-// in the preview matches what the command will create (to the second).
+// `$(date +FORMAT)` becomes the current date.
 const DATE_CODES = { Y: (d) => d.getFullYear(), y: (d) => String(d.getFullYear()).slice(-2), m: (d) => d.getMonth() + 1, d: (d) => d.getDate(),
   H: (d) => d.getHours(), M: (d) => d.getMinutes(), S: (d) => d.getSeconds(), s: (d) => Math.floor(d / 1000), "%": () => "%" };
 function formatDate(fmt, now) {
@@ -150,14 +133,11 @@ function inlineDates(command, maskQuoted, now = new Date()) {
   return out;
 }
 
-// `B=/x/y; F=$B/z; mv $F/a ...` becomes `mv /x/y/z/a ...`. Only plain values
-// (no spaces, quotes or expansions) at the top level, ended by ; or &&.
+// `B=/x; mv $B/a` becomes `mv /x/a`, for plain values only.
 function inlineVariables(command, maskQuoted) {
   let out = command;
   for (let guard = 0; guard < 10; guard++) {
-    // Find NAME= at the start of a step in the masked text, then read the
-    // value from the original: masking blanks quoted text, so a quoted value
-    // would otherwise look empty.
+    // Masking blanks quoted text, so the value is read from the original.
     const m = /(?:^|;|&&)\s*([A-Za-z_][A-Za-z0-9_]*)=/d.exec(maskQuoted(out).text);
     if (!m) break;
     const name = m[1];
@@ -173,13 +153,11 @@ function inlineVariables(command, maskQuoted) {
       value = /^[^\s;&|'"`$()<>\\]*/.exec(out.slice(valueStart))[0];
       valueEnd = valueStart + value.length;
     }
-    // Only plain, non-empty values: no spaces, quotes or expansions.
     if (!value || /[\s'"`$\\]/.test(value)) break;
     const sep = /^\s*(?:;|&&)\s*/.exec(out.slice(valueEnd));
     if (!sep) break;
     let rest = out.slice(valueEnd + sep[0].length);
-    // A $ that survives masking is live (unquoted or in double quotes); the
-    // name after it is read from the original text.
+    // A $ that survives masking is live (unquoted or in double quotes).
     const masked = maskQuoted(rest).text;
     const ref = new RegExp(`^\\$(?:\\{${name}\\}|${name}(?![A-Za-z0-9_]))`);
     let replaced = "", last = 0;
@@ -195,8 +173,7 @@ function inlineVariables(command, maskQuoted) {
   return out;
 }
 
-// Unquoted {a,b,c} inside a word becomes one word per item: x{1,2}y -> x1y x2y.
-// A {a..b} range or nested braces are left alone (the engine then refuses).
+// x{1,2}y -> x1y x2y; ranges and nested braces are left for the engine to refuse.
 function expandBraces(command, maskQuoted) {
   let out = command;
   for (let guard = 0; guard < 20; guard++) {
@@ -214,7 +191,6 @@ function expandBraces(command, maskQuoted) {
   return out;
 }
 
-// Snapshot the real folder as the engine's file list.
 function snapshot(root, command) {
   const files = [];
   const opaque = [];
@@ -258,8 +234,7 @@ function humanSize(bytes) {
   return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
 }
 
-// Keep the header to one line in a narrow terminal: ~ for the home folder, and
-// only the last two folders of a long path.
+// ~ for the home folder, and only the last two folders of a long path.
 function shortPath(abs, home = os.homedir()) {
   let p = abs;
   if (home && (p === home || p.startsWith(home + path.sep))) p = "~" + p.slice(home.length);
@@ -280,7 +255,6 @@ function listLines(items, fmt) {
   return lines;
 }
 
-// Group the engine's effects into a short text preview.
 function render(effects, { opaque = [] } = {}) {
   const by = (types) => effects.filter((e) => types.includes(e.type));
   const deleted = by(["delete"]);
@@ -301,10 +275,9 @@ function render(effects, { opaque = [] } = {}) {
   }
   if (overwritten.length) {
     lines.push(`OVERWRITE ${plural(overwritten.length, "file")} — old contents are lost`);
-    lines.push(...listLines(overwritten, (e) => `  ! ${e.path}  (${humanSize(e.before.size)}, replaced by ${e.from})`));
+    lines.push(...listLines(overwritten, (e) => `  ! ${e.path}  (${humanSize(e.before.size)}${e.from ? `, replaced by ${e.from}` : ""})`));
   }
-  // gzip replaces x with x.gz and gunzip the reverse: a move in the
-  // simulator, a compression to the user.
+  // A move between x and x.gz is gzip or gunzip.
   const compressed = moved.filter((e) => !e.before && e.path === e.from + ".gz");
   const decompressed = moved.filter((e) => !e.before && e.from === e.path + ".gz");
   const plainMoves = moved.filter((e) => !e.before && !compressed.includes(e) && !decompressed.includes(e));
@@ -334,8 +307,7 @@ function render(effects, { opaque = [] } = {}) {
   return lines;
 }
 
-// Does any part of this step (split at | ; && ||) run a command the simulator
-// models in a way that changes files? `tar -t … | awk …` does not.
+// Whether any part of a step changes files (`tar -t … | awk …` does not).
 function changesFiles(cmd) {
   const { P } = load();
   const masked = P.maskQuoted(cmd).text;
@@ -348,18 +320,37 @@ function changesFiles(cmd) {
   return parts.some((part) => triggers(part, ENGINE_COMMANDS) && P.classify(part.trim()).kind !== "readonly");
 }
 
-// Main entry point. Returns
-//   { status: "skip" }                          not a reviewed command
-//   { status: "preview", text, effects, ... }   previewed exactly
-//   { status: "unpreviewable", text, reason }   reviewed command we cannot simulate
+// Returns { status: "skip" } for commands that are not reviewed,
+// { status: "preview", text, effects, errors } when the whole command was
+// previewed, and { status: "unpreviewable", text, reason } otherwise.
+// FILE_REVIEW_MODE=simulate skips the dry run.
 function reviewCommand(command, cwd, options = {}) {
   const commands = options.commands || enabledCommands(options.env);
   if (typeof command !== "string" || !command.trim() || !triggers(command, commands)) return { status: "skip" };
+  cwd = cwd || process.cwd();
+  const mode = (options.env && options.env.FILE_REVIEW_MODE) || process.env.FILE_REVIEW_MODE || "auto";
+  let note = null;
+  if (mode !== "simulate") {
+    const run = sandbox.dryRun(command, cwd);
+    if (run.ok) return fromDryRun(run, cwd);
+    note = `Dry run not possible (${run.reason}); simulated instead.`;
+  }
+  return simulate(command, cwd, note);
+}
 
+function fromDryRun(run, cwd) {
+  const errors = run.exitCode === 0 ? [] : [`exits with status ${run.exitCode}${run.stderr ? `: ${run.stderr.split("\n")[0].slice(0, 160)}` : ""}`];
+  const lines = [`File change preview (dry run in a sandboxed copy of ${shortPath(cwd)})`, ...render(run.effects)];
+  if (!run.effects.length) lines.push("No files would change.");
+  if (errors.length) lines.push("Errors the command would hit:", ...errors.map((e) => `  x ${e}`));
+  return { status: "preview", mode: "dry-run", text: lines.join("\n"), effects: run.effects, errors };
+}
+
+function simulate(command, cwd, note) {
   const { P } = load();
-  const moved = splitLeadingCd(command, cwd || process.cwd());
+  const moved = splitLeadingCd(command, cwd);
   const root = moved.cwd;
-  const header = `File change preview (in ${shortPath(root)})`;
+  const header = [`File change preview (in ${shortPath(root)})`, ...(note ? [note] : [])].join("\n");
   const fail = (reason, rest = []) => ({
     status: "unpreviewable",
     reason,
@@ -379,17 +370,13 @@ function reviewCommand(command, cwd, options = {}) {
   const effects = [];
   const errors = [];
   const reasons = [];
-  // Every step the simulation did not cover and that is not proven read-only.
-  // A partial preview must never hide a later rm behind its first reason.
+  // Steps not simulated and not read-only, so a later rm is never hidden.
   const unsimulated = [];
   for (const step of sim.steps) {
-    // A blocked result means the engine refused to simulate (outside the
-    // folder, unsupported flag...): that is "can't preview", not a run error.
     if (step.r && step.r.blocked) reasons.push(`\`${step.cmd}\`: ${step.r.errors.join("; ")}`);
     else if (step.r) { effects.push(...step.r.effects); errors.push(...step.r.errors.map(friendly)); }
     if (step.cls && step.cls.kind === "changes" && !step.skipped) reasons.push(`\`${step.cmd}\` ${step.cls.reason}`);
-    // Skipping the other branch of `&&` / `||` is normal control flow; only an
-    // unknown outcome means the preview may be wrong.
+    // Skipping the other branch of && / || is normal, not a gap.
     const normalSkip = step.harmless || /^the previous command (failed|succeeded)$/.test(step.skipReason || "");
     if (step.skipped && step.skipReason && !normalSkip && !reasons.length) reasons.push(`\`${step.cmd}\` skipped: ${step.skipReason}`);
     const missed = (step.r && step.r.blocked) || (!step.skipped && step.cls && step.cls.kind === "changes") || (step.skipped && !normalSkip);
@@ -410,6 +397,7 @@ function reviewCommand(command, cwd, options = {}) {
   if (reasons.length) lines.push(...notPreviewed, `Partly previewed: ${reasons.map(friendly).join("; ")}`);
   return {
     status: reasons.length ? "unpreviewable" : "preview",
+    mode: "simulate",
     reason: reasons.join("; "),
     text: lines.join("\n"),
     effects,

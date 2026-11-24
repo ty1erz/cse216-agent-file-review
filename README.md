@@ -3,175 +3,63 @@
 CSE 216 project, Fall 2026: Xiaokang Ye, Jixuan Chen, Yirui Miao, Tianyue Zhang, Zifan Yang.
 
 When an AI agent wants to delete, copy or move files, a plain "Approve?" prompt
-rarely shows *which* files change. We compare that prompt with a structured
-preview of every affected file. Both screens are embedded in recognizable
-OpenHands, Cline and Codex CLI interaction shells so the prototype can also be
-evaluated in the context of current coding-agent interfaces. The same preview
-also runs inside a real agent: the `file-review` plugin shows it in Claude
-Code's own approval prompt.
+rarely shows which files change. We built a preview that lists every affected
+file, in two forms:
 
-**Live:** [interactive prototype](https://ty1erz.github.io/cse216-agent-file-review/#try) ·
-[survey](https://ty1erz.github.io/cse216-agent-file-review/#survey) ·
-[demo with answer key](https://ty1erz.github.io/cse216-agent-file-review/#demo) ·
-[Claude Code plugin](#claude-code-plugin)
+- a **Claude Code plugin** that adds the preview to Claude Code's own approval
+  prompt, on your real files, and
+- a **web prototype** that shows the plain prompt and the preview side by side
+  on a mock folder.
 
-## What's here
+**Live demo:** [web prototype](https://ty1erz.github.io/cse216-agent-file-review/#try) ·
+[all scenarios with answer key](https://ty1erz.github.io/cse216-agent-file-review/#demo)
 
-| Path | What it is |
+## Repository
+
+| Path | Contents |
 |---|---|
-| `prototype/` | Web prototype: both confirmation screens in three agent harnesses, the interactive `#try` mode and the survey. No build step. |
-| `agent-proxy/` | Apps Script proxy that asks a model (Claude or UCSD TritonAI) for commands; the API key stays in its Script Properties. |
-| `survey/` | Apps Script collector that writes survey responses to the team's Google Sheet and confirms each save. |
-| `integrations/` | Runs the preview engine on real files. `core/` works for any agent; `claude-code/` holds the Claude Code hook and the demo folder builder. |
-| `.claude-plugin/`, `hooks/` | Claude Code plugin manifest, marketplace entry and hook registration. |
-| `tests/` | Node tests for the engine, classifier, plugin, collector and survey submission. `tests/stress/` holds real model plans, the scripts that collect and replay them, and the headless Claude Code runner. |
-| `docs/experiment-design.md` | Integrated study design, assignment and analysis plan. |
-| `docs/third-party-notices.md` | Upstream interface references, revisions and licenses. |
-| `research/command_selection.md` | Why we chose `rm`, `cp` and `mv`, with data |
-| `research/scripts/analyze_nl2bash.py` | Counts commands in the NL2Bash dataset |
-| `research/scripts/count_agent_commands.py` | Counts commands in your own Claude Code and Codex logs |
-| `research/agent_counts/` | Each teammate's counts (numbers only, no command text) |
-
-## Run the prototype
-
-```bash
-python3 -m http.server 8216 --directory prototype
-```
-
-Then open http://localhost:8216. Three modes:
-
-- `#try`: the interactive prototype. Type a request in plain English. A model
-  sees the mock file tree and proposes the shell commands an agent would run.
-  The page distinguishes supported file changes, an explicit set of read-only
-  commands, and commands it cannot preview. Supported changes are `rm`, `cp`,
-  `mv`, `mkdir`, `rmdir`, `tar -c`, `gzip` and `gunzip` (with common flags such as `-r`,
-  `-n`, `-u`, `-a` and `-t DIR`), plus `find` with `-delete` or
-  `-exec rm/mv/cp {}` and simple `for f in ...; do ...; done` loops, which are
-  previewed as the exact commands they expand to. Read-only pipelines
-  (`find ... | sort`), `2>/dev/null`, `&&` / `||` and file checks such as
-  `[ -e path ]` or `test -d dir` are understood. Anything else
-  blocks Approve. Approve applies the change to the mock files, and Undo
-  reverts it. You can edit the agent's commands, or type your own when the
-  model isn't connected.
-- `#demo`: every survey scenario, with selectors for the confirmation screen
-  and agent harness, plus an answer key.
-- `#survey`: the study.
-
-The interactive mode lives in `prototype/playground.js`.
-
-### How the survey works
-
-- Everyone sees the same 8 scenarios (3 rm, 2 cp, 3 mv), half on the plain
-  prompt and half on the file preview.
-- Each participant is assigned one harness for the entire survey: OpenHands,
-  Cline or Codex CLI. Assignment is random by default, or can be fixed with the
-  links below when the team needs balanced group sizes.
-- Scenarios are split into sets X and Y, each with 2 commands that match the
-  request and 2 that don't. A participant is randomly put in one of 4 groups
-  (which set goes on which screen × which screen comes first), and scenarios
-  are shuffled within each part.
-- Each part starts with an unscored practice round.
-- We record each decision (approve / reject / request change), binary approval
-  accuracy, response time, a 1–5 confidence rating and an optional comment.
-  Accuracy means approving matching commands and declining mismatching ones;
-  reject and request change both count as declining. The action itself is
-  retained for separate analysis.
-  After each part: 4 Likert items about that screen. At the end: which screen
-  they prefer and why.
-- No names or emails are collected.
-
-For a small pilot, distribute the fixed links evenly instead of relying on
-random assignment:
-
-- `?harness=openhands#survey`
-- `?harness=cline#survey`
-- `?harness=codex#survey`
-
-For example, with five team reviewers use two OpenHands links, two Cline links
-and one Codex link. Treat harness comparisons as exploratory at that sample
-size; the main study comparison remains plain prompt versus file preview.
-
-Scenarios live in `prototype/scenarios.js`; the preview logic is in
-`prototype/engine.js`.
-
-### Collecting responses
-
-The checked-in configuration submits to the team's Google Sheet collector.
-Participants can also download a JSON file. To configure another collector:
-
-1. Create a Sheet, then open Extensions → Apps Script and replace the code with
-   [`survey/collect_responses.gs`](survey/collect_responses.gs).
-2. Deploy → New deployment → Web app, execute as yourself, access "Anyone".
-3. Paste the web app URL into `submitUrl` in `prototype/config.js`.
-
-Each response adds a row to the `responses` tab (background, ratings,
-preference) and one row per scenario to the `trials` tab (decision, correct,
-time, confidence), ready for a pivot table. Both tabs include the assigned
-`harness`. Replace the deployed Apps Script with the current file and create a
-new deployment version to enable schema validation, safe text cells, duplicate
-protection and storage receipts. After posting, the page reads
-`?receipt=<response-id>` and reports success only if the collector confirms
-the response and all eight trials. With an older deployment, submission stays
-unconfirmed; the participant is asked to download the response. Completed
-responses are backed up in this browser until receipt confirmation, and can
-be downloaded from the home page after a reload.
-
-Before surveying people outside the team, check with the professor whether
-this needs IRB review.
-
-### Connecting the model (`agent-proxy/`)
-
-The page can't hold an API key, so model calls go through a small Apps Script
-web app in `agent-proxy/`. Its URL is `agentUrl` in `prototype/config.js`. To
-set it up, open the script and go to Project Settings → Script properties:
-
-| Property | Value |
-|---|---|
-| `LLM_API_KEY` | A Claude API key, or a UCSD TritonAI key |
-| `LLM_PROVIDER` | `anthropic` (default) or `openai` for TritonAI |
-| `LLM_MODEL` | default `claude-opus-5-5` (Claude) or `api-glm-5.3-flash` (TritonAI) |
-| `LLM_BASE_URL` | TritonAI only: `https://tritonai-api.ucsd.edu/v1` |
-| `DAILY_LIMIT` | optional, model calls per day (default 300) |
-
-Then pick `authorize` in the editor's function menu, click Run once, and
-approve. Deploy the web app with access for the intended participants and set
-`agentUrl` to that deployment's `/exec` URL. Opening it should return
-`{"ok":true,"configured":true}`. The key never appears in the front end.
+| `integrations/` | The plugin. `core/` previews a command (dry run or simulation) for any agent; `claude-code/` is the Claude Code hook and the demo folder builder. |
+| `.claude-plugin/`, `hooks/` | Plugin manifest, marketplace entry and hook registration. |
+| `prototype/` | Web prototype; `engine.js` is the simulator shared with the plugin. No build step. |
+| `agent-proxy/`, `survey/` | Apps Script back ends: the model proxy for `#try` and the survey collector. |
+| `tests/` | Node tests; `tests/stress/` holds real agent runs and the scripts that produce them. |
+| `docs/` | Study design and third-party notices. |
+| `research/` | Why we started with `rm`, `cp` and `mv`, with command counts. |
 
 ## Claude Code plugin
 
-`file-review` brings the file preview to Claude Code. Before Claude runs a Bash
-command that uses `rm`, `cp`, `mv`, `mkdir`, `rmdir`, `tar`, `gzip` or
-`gunzip`, the approval prompt lists every file the command would delete,
-overwrite, move, compress or create:
+Before Claude runs a Bash command that uses `rm`, `cp`, `mv`, `mkdir`, `rmdir`,
+`tar`, `gzip`, `gunzip`, `zip`, `unzip` or `rsync`, the approval prompt lists
+every file it would delete, overwrite, move, compress or create:
 
 ```text
 Bash command
-  rm -rf build *.log
+  cp camera/*.jpg photos/
 Hook PreToolUse:Bash requires confirmation for this command:
-File change preview (in …/live-test)
-DELETE 3 files (4.0 KB) and 2 folders — cannot be undone
-  - build/app.js  4.0 KB
-  - build/maps/app.js.map  4 B
-  - debug.log  4 B
+File change preview (dry run in a sandboxed copy of /tmp/fr-demo)
+OVERWRITE 2 files — old contents are lost
+  ! photos/IMG_0001.jpg  (3.4 MB)
+  ! photos/IMG_0002.jpg  (3.5 MB)
+CREATE 1 file
+  + photos/IMG_0003.jpg
 Do you want to proceed?
 ❯ 1. Yes
   2. No
 ```
 
-The plugin never changes files itself; you still choose Yes or No.
+You still choose Yes or No; the plugin never changes your files.
 
 ### Install
 
-You need Claude Code and Node.js 20 or later (the hook runs `node`).
+Requires Claude Code and Node.js 20 or later.
 
-To try it for one session from a checkout:
+For one session, from a checkout:
 
 ```bash
 claude --plugin-dir /path/to/cse216-agent-file-review
 ```
 
-To install it for every session (reads the `main` branch):
+For every session:
 
 ```bash
 claude plugin marketplace add ty1erz/cse216-agent-file-review
@@ -183,11 +71,10 @@ claude plugin install file-review@cse216-agent-file-review
 
 Turn it off with `claude plugin disable file-review`.
 
-### Try it on the demo folder
+### Try it
 
-This builds a throwaway copy of the study's mock home folder. The files are
-sparse, so they show realistic sizes but take no real space, and nothing
-there matters if it gets deleted:
+Build a throwaway copy of the study's mock home folder (sparse files, so it
+takes no real space), then start Claude Code in it:
 
 ```bash
 npm run demo -- /tmp/file-review-demo
@@ -197,134 +84,145 @@ npm run demo -- /tmp/file-review-demo
 cd /tmp/file-review-demo && claude --plugin-dir /path/to/cse216-agent-file-review
 ```
 
-The script prints requests to try and the preview each should produce. A good
-first one is "Copy the new photos from camera into my photos library": it
-sounds harmless, and the prompt shows it would overwrite two photos.
-
-### Settings
-
-Set these as environment variables before starting `claude`:
-
-| Variable | Effect |
-|---|---|
-| `FILE_REVIEW_COMMANDS` | Commands that trigger a review. Default `rm,cp,mv,mkdir,rmdir,tar,gzip,gunzip`; set e.g. `rm,cp,mv` to review fewer. |
-| `FILE_REVIEW_STRICT=1` | Refuse reviewed commands that can't be previewed, so Claude rewrites them, instead of asking. |
-| `FILE_REVIEW_LOG=<file.jsonl>` | Append every Bash command and the plugin's decision to a file. |
+The script prints requests to try, such as "Copy the new photos from camera
+into my photos library", which overwrites two photos.
 
 ### How it works
 
-1. `hooks/hooks.json` registers a PreToolUse hook on Claude Code's Bash tool.
-   Before each Bash command, Claude Code runs
-   `integrations/claude-code/pretooluse.js` and passes it the command.
-2. `integrations/core/review.js` checks whether the command runs a reviewed
-   command (or `find -delete`). If not, the hook prints nothing and Claude
-   Code's usual permissions apply.
-3. Otherwise it records the names, sizes and dates of files in the working
-   folder (never their contents), runs `prototype/engine.js` on that list,
-   and answers "ask" with the preview.
-4. If it cannot simulate the command faithfully, it still answers "ask", with
-   "Could not preview" and the reason. When only part of a command could be
-   simulated, the prompt lists every later step under NOT PREVIEWED, marking
-   with `!` those that change files, so an `rm` at the end is never hidden. A
-   reviewed command never runs without a prompt.
+A PreToolUse hook (`integrations/claude-code/pretooluse.js`) sees each Bash
+command before it runs. Commands that use none of the reviewed commands pass
+through to Claude Code's usual permissions. For the rest:
 
-It also handles common agent habits: a leading `cd DIR &&`, absolute paths
-inside the folder, `~`, brace lists like `a{1,2}.pdf`, single-command
-`if …; then …; fi`, `\` line continuations, plain variables such as
-`B=/path; mv $B/x …`, dated names such as `backup-$(date +%Y%m%d).tgz`,
-`tar -C DIR` and `--exclude`, and read-only checks such as `&& cmp a b`,
-`tar -t` and `gzip -t`.
-Big folders such as `node_modules` and `.git` are only scanned when the
-command names them.
+1. **Dry run** (macOS). The working folder is cloned copy-on-write, which is
+   instant and takes no extra space. The command runs on the clone under
+   `sandbox-exec`, with the network and every write outside the clone blocked.
+   The clone is compared before and after, and the differences are the
+   preview. Because the real shell runs the command, quoting, variables,
+   loops, pipes and file contents all behave exactly as they will for real.
+2. **Simulation** (fallback). If the dry run is not possible (not macOS, a
+   folder over 20,000 entries, a write outside the folder, the network, or
+   more than 4 seconds), `prototype/engine.js` simulates the command on a list
+   of file names, sizes and dates. The prompt says why it fell back.
+3. **Always ask.** A reviewed command always gets a prompt. If part of it
+   cannot be simulated, the prompt says so and lists every remaining step
+   under NOT PREVIEWED, with `!` on steps that change files.
 
-### Other agents
+`integrations/core/` has nothing specific to Claude Code; another agent needs
+only an adapter that passes the command and folder to `reviewCommand()`.
 
-`integrations/core/` has nothing specific to Claude Code. To support another
-agent, add an adapter next to `integrations/claude-code/` that passes the
-command and folder to `reviewCommand()` and turns its result into that
-agent's approval format.
+### Settings
 
-### Testing against real Claude Code
+Environment variables, set before starting `claude`:
 
-`tests/stress/run_claude_code.js` runs each request in
-`tests/stress/prompts.txt` through headless Claude Code with the plugin, each
-in a fresh demo folder, and logs every Bash command Claude tries. Headless
-runs cannot answer "ask", so the demo folders are not changed. It uses your
-Claude Code login and usage:
+| Variable | Effect |
+|---|---|
+| `FILE_REVIEW_MODE=simulate` | Skip the dry run and always simulate. |
+| `FILE_REVIEW_COMMANDS` | Commands that trigger a review, comma-separated. Default: all listed above. |
+| `FILE_REVIEW_STRICT=1` | Refuse commands that cannot be previewed instead of asking, so Claude rewrites them. |
+| `FILE_REVIEW_LOG=<file.jsonl>` | Log every Bash command and the plugin's decision. |
+
+### Limitations
+
+- The dry run needs macOS. Elsewhere the simulator is used; it previews most
+  agent commands but not loops that build names with other commands,
+  `cd subdir` followed by `../`, `cp -R dir/.`, `tar -x`, or `zip`.
+- Commands that need the network or write outside the working folder cannot
+  be dry-run.
+- `git mv` and the agent's own file-edit tools are not reviewed.
+
+## Web prototype
+
+```bash
+python3 -m http.server 8216 --directory prototype
+```
+
+Open http://localhost:8216:
+
+- `#try`: type a request; a model sees the mock folder and proposes shell
+  commands, which are previewed and applied to the mock files on Approve.
+  Without a model connected, type commands yourself.
+- `#demo`: every scenario, with the plain prompt or the preview, in OpenHands,
+  Cline or Codex CLI style shells, plus an answer key.
+- `#survey`: a within-subjects study of 8 scenarios (3 `rm`, 2 `cp`, 3 `mv`),
+  half on each screen, counterbalanced. Design and analysis plan:
+  [`docs/experiment-design.md`](docs/experiment-design.md).
+
+`.github/workflows/pages.yml` publishes `prototype/` to GitHub Pages on every
+push to `main` that changes it.
+
+### Back ends
+
+Both are Apps Script web apps; their URLs are in `prototype/config.js`.
+
+- **Model proxy** (`agent-proxy/`), used by `#try`. In Project Settings →
+  Script properties set `LLM_API_KEY` (Claude or UCSD TritonAI), and for
+  TritonAI also `LLM_PROVIDER=openai` and
+  `LLM_BASE_URL=https://tritonai-api.ucsd.edu/v1`. Optional: `LLM_MODEL`,
+  `DAILY_LIMIT` (default 300). Run `authorize` once, deploy as a web app and
+  set `agentUrl`. The key never reaches the page.
+- **Survey collector** (`survey/collect_responses.gs`). Paste it into a
+  Sheet's Apps Script, deploy as a web app with access "Anyone", and set
+  `submitUrl`. Each response adds a row to `responses` and one row per
+  scenario to `trials`; the page reports success only after the collector
+  confirms the save.
+
+## Development
+
+```bash
+npm test
+```
+
+Node.js 20 or later, no packages to install. CI runs the tests on every push
+and pull request; dry-run tests run only on macOS.
+
+`main` is protected: push a branch and open a pull request. No approval is
+required.
+
+### Real agent runs
+
+`tests/stress/run_claude_code.js` sends each request in a prompts file to
+headless Claude Code with the plugin, each in a fresh demo folder, and logs
+every Bash command. Headless runs cannot answer the prompt, so the folders
+are not changed. It uses your Claude Code login:
 
 ```bash
 node tests/stress/run_claude_code.js /tmp/fr-runs --jobs 6 --only delete,copy,move,rename,combined,risky
 ```
 
-The report lists commands the plugin could not preview and file-changing
-commands it does not review; reprint it with `--report`. Pass
-`--prompts tests/stress/prompts-edge.txt` for requests aimed at `mkdir`,
-`rmdir`, `tar` and `gzip`. In the last run (44
-requests, 161 commands), 33 of the 36 reviewed commands previewed fully and no
-command changed files without a review.
+```bash
+node tests/stress/run_claude_code.js /tmp/fr-edge --jobs 6 --prompts tests/stress/prompts-edge.txt
+```
 
-### Known limitations
+Across both sets (64 requests, 241 commands), the dry run previewed all 65
+reviewed commands; the simulator alone previewed 56.
 
-These still ask with "Could not preview":
-
-- loop bodies with other expansions (`${f:11:10}`, `$(echo … | sed …)`)
-- `cd subdir && mv ../../x …`
-- variables whose value is not plain text (`X=$(ls)`)
-- `cp -R dir/. dest` (copying a folder's contents)
-- `xargs` pipelines
-- `tar -x`, which can overwrite files the archive lists
-
-`rsync`, `zip`/`unzip`, `git mv` and the agent's own file-edit tools are not
-reviewed.
-
-## Verify changes
-
-Run `npm test` with Node.js 20 or later; no packages need installing. Tests
-cover the command preview engine, command classification, the Claude Code
-plugin (on temporary folders), async request state, survey collector and
-storage confirmation. CI runs them on every push and PR.
-For a manual check, open `#try`, `#demo`, and each fixed harness survey link.
-The interactive prototype is a separate demonstration; only `#survey` records
-study decisions. The study uses its displayed reference date for every file.
-
-`tests/model-plans.test.js` replays real model plans saved in
-`tests/stress/plans*.json` and fails if any of them stops previewing. To
-collect a new batch and see what blocks (needs a TritonAI key in `.env`):
+`tests/model-plans.test.js` replays saved TritonAI model plans
+(`tests/stress/plans*.json`) through the simulator. To collect a new batch
+(needs a TritonAI key in `.env`):
 
 ```bash
 python3 -I tests/stress/generate_plans.py tests/stress/plans-new.json api-glm-5.3-flash
-node tests/stress/replay.js tests/stress/plans-new.json --verbose
 ```
 
-Requests live in `tests/stress/prompts.txt`; the workspace is the home folder
-from `prototype/scenarios.js` (`node tests/stress/dump_workspace.js`).
+## Research data
 
-### Publish online
-
-`.github/workflows/pages.yml` publishes `prototype/` to GitHub Pages on every
-push to `main` that changes it (Settings → Pages → Source: GitHub Actions is
-already enabled). Browsers may cache the old files for up to 10 minutes.
-
-### Contributing
-
-`main` is protected: push a branch and open a pull request. No approval is
-required, so you can merge your own PR once CI passes.
-
-## Add your agent counts
+Count the commands in your own Claude Code and Codex logs (counts only, never
+command text) and commit the JSON:
 
 ```bash
 python3 -I research/scripts/count_agent_commands.py research/agent_counts/<your-name>.json
 ```
 
-This reads `~/.claude/projects` and `~/.codex`. It saves counts only, never
-commands or file names. Commit the JSON.
-
-## Reproduce the NL2Bash numbers
+Reproduce the NL2Bash numbers in `research/command_selection.md`:
 
 ```bash
 mkdir -p research/data/nl2bash
-curl -sSL -o research/data/nl2bash/all.cm https://raw.githubusercontent.com/TellinaTool/nl2bash/master/data/bash/all.cm
-python3 -I research/scripts/analyze_nl2bash.py research/data/nl2bash/all.cm research/nl2bash_counts.json
 ```
 
-The dataset itself isn't committed (`research/data/` is ignored).
+```bash
+curl -sSL -o research/data/nl2bash/all.cm https://raw.githubusercontent.com/TellinaTool/nl2bash/master/data/bash/all.cm
+```
+
+```bash
+python3 -I research/scripts/analyze_nl2bash.py research/data/nl2bash/all.cm research/nl2bash_counts.json
+```

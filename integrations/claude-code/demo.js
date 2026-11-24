@@ -1,12 +1,7 @@
 #!/usr/bin/env node
-// Build a throwaway folder from the study's mock home (prototype/scenarios.js)
-// so you can try the plugin on requests that make Claude change files.
-//
-//   node integrations/claude-code/demo.js <empty-or-new-folder>
-//
-// Files are sparse: each reports its mock size (e.g. a 52 MB video) but takes
-// almost no disk space. Dates stay as in the study (mock "today" is
-// Oct 23, 2026), matching file names such as logs/server-2026-10-23.log.
+// Builds the study's mock home folder (prototype/scenarios.js) as sparse files
+// in an empty folder, for trying the plugin:
+//   node integrations/claude-code/demo.js <new-folder>
 
 "use strict";
 
